@@ -1,0 +1,35 @@
+# NH선물 Open API 설정 파일 서식
+#
+# 사용법
+#   1. 이 파일을 아래 경로로 복사합니다.
+#      Windows       : %USERPROFILE%\NHFutures\config\config.yaml
+#      macOS / Linux : ~/NHFutures/config/config.yaml
+#   2. 복사한 파일에 발급받은 키를 넣습니다.
+#
+# APP Key 와 Secret Key 는 모의·실전, 국내·해외가 각각 따로 발급됩니다.
+# 쓰지 않는 환경이나 시장은 비워 둡니다.
+#
+# 실제 키가 든 config.yaml 은 이 저장소에 올리지 않습니다 (.gitignore 참고).
+
+# 접속할 환경: paper(모의) 또는 real(실전)
+default_environment: paper
+
+# 모의환경 — 비워 두면 https://apidemo.futures.co.kr
+paper:
+  base_url: ""
+  domestic:
+    app_key: ""
+    app_secret: ""
+  overseas:
+    app_key: ""
+    app_secret: ""
+
+# 실전환경 — 비워 두면 https://api.futures.co.kr
+real:
+  base_url: ""
+  domestic:
+    app_key: ""
+    app_secret: ""
+  overseas:
+    app_key: ""
+    app_secret: ""

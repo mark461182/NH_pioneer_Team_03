@@ -1,0 +1,19 @@
+# 인증 정보 — 절대 올리지 않습니다
+config.yaml
+*.key
+*.secret
+.env
+secret.json
+
+# 파이썬
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# 에디터·OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
