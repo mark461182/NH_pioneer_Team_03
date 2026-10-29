@@ -1,0 +1,118 @@
+{
+  "version": {
+    "id": "team03-w2-k200-check-5m-rsi",
+    "groupId": "team03-w2-k200-check-5m-rsi",
+    "name": "풀옵션_2주차_앱동작확인_5분봉_RSI",
+    "version": "v1",
+    "status": "초안",
+    "market": "domestic",
+    "productCode": "KOSPI",
+    "productKind": "futures",
+    "contractCode": "",
+    "instrumentFallback": "코스피200 선물",
+    "role": "kospiFutures",
+    "account": "앱 시뮬레이션 · 국내",
+    "record": "앱 시뮬레이션",
+    "currency": "KRW",
+    "orderQty": 1,
+    "marginBudget": 100000000,
+    "dailyLoss": 5000000,
+    "seed": "empty",
+    "tags": [
+      "풀옵션",
+      "2주차",
+      "앱동작확인"
+    ],
+    "summary": "앱 주문 흐름 확인용 — 전략 평가 대상이 아닙니다. 5분봉 마감에서 RSI(3)가 30 아래면 매수 진입하고, 종가가 MA(10) 위로 올라오면 청산합니다. 손절 100틱, 하루 진입 3번까지, 세션 끝 10분 전 전량 정리. 한 번에 1계약."
+  },
+  "draft": {
+    "baseBar": "5분봉",
+    "evalMode": "마감",
+    "memo": "풀옵션 2주차 앱 동작 확인용 — S4(일봉) 규칙의 RSI 눌림목·MA 청산을 5분봉으로 옮겨, 금요일 장중에 주문·체결·청산(규칙·손절·세션 끝) 흐름이 실제로 일어나는지 봅니다. 추세 필터는 뺐습니다. 수익성 검증을 하지 않은 설정이라 결과를 전략 성과로 해석하지 않습니다.",
+    "aux": {
+      "session": "국내 주간",
+      "orderType": "시장가",
+      "fillCond": "FAS",
+      "priceBasis": "신호가",
+      "buyPriceBasis": "",
+      "sellPriceBasis": "",
+      "stopBasis": "",
+      "perOrder": "1",
+      "maxHold": "1",
+      "addWhileOpen": false,
+      "stopTicks": "100",
+      "stopUnit": "tick",
+      "takeTicks": "",
+      "takeUnit": "tick",
+      "trailTicks": "",
+      "trailUnit": "tick",
+      "sessionEndFlat": true,
+      "sessionEndMinutes": "10",
+      "entryStart": "",
+      "entryEnd": "",
+      "reentryWaitBars": "0",
+      "maxEntriesPerDay": "3",
+      "lossStreak": "",
+      "dailyLoss": "5000000",
+      "marginBudget": "100000000"
+    },
+    "rules": {
+      "buyEntry": {
+        "on": true,
+        "resetBars": "",
+        "steps": [
+          {
+            "id": "s1",
+            "join": "all",
+            "withinBars": 0,
+            "conds": [
+              {
+                "id": "c1",
+                "left": "rsi",
+                "leftParams": {
+                  "period": 3
+                },
+                "op": "lt",
+                "right": "30",
+                "rightKind": "number"
+              }
+            ]
+          }
+        ]
+      },
+      "sellEntry": {
+        "on": false,
+        "resetBars": "",
+        "steps": []
+      },
+      "buyExit": {
+        "on": true,
+        "resetBars": "",
+        "steps": [
+          {
+            "id": "s2",
+            "join": "all",
+            "withinBars": 0,
+            "conds": [
+              {
+                "id": "c2",
+                "left": "close",
+                "op": "gt",
+                "right": "ma",
+                "rightKind": "operand",
+                "rightParams": {
+                  "period": 10
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "sellExit": {
+        "on": false,
+        "resetBars": "",
+        "steps": []
+      }
+    }
+  }
+}

@@ -1,0 +1,127 @@
+{
+  "version": {
+    "id": "team03-w2-k200-s4-rsi-pullback",
+    "groupId": "team03-w2-k200-s4-rsi-pullback",
+    "name": "풀옵션_2주차_코스피200_S4_RSI눌림목",
+    "version": "v1",
+    "status": "초안",
+    "market": "domestic",
+    "productCode": "KOSPI",
+    "productKind": "futures",
+    "contractCode": "",
+    "instrumentFallback": "코스피200 선물",
+    "role": "kospiFutures",
+    "account": "앱 시뮬레이션 · 국내",
+    "record": "앱 시뮬레이션",
+    "currency": "KRW",
+    "orderQty": 1,
+    "marginBudget": 100000000,
+    "dailyLoss": 5000000,
+    "seed": "empty",
+    "tags": [
+      "풀옵션",
+      "2주차"
+    ],
+    "summary": "일봉 마감에서 종가가 SMA(100) 위이고 RSI(3)가 30 아래면 매수 진입 — 다음 거래 창 첫 체결에 시장가로 냅니다. 종가가 SMA(10) 위로 올라오면 청산합니다. 손절은 진입가 대비 −20%(재해 방어용, 2000~2026 백테스트 241거래에서 한 번도 닿지 않은 거리)입니다. 매도 진입은 없고, 여러 날 보유하므로 세션 끝 정리는 끕니다. 한 번에 1계약."
+  },
+  "draft": {
+    "baseBar": "일봉",
+    "evalMode": "마감",
+    "memo": "풀옵션 2주차 S4 — Connors·Alvarez(2008) RSI 눌림목을 2001–2024 코스피200 선물 연결 일봉으로 튜닝한 1위 숫자(RSI(3) < 30, 추세 SMA100, 청산 SMA10). 앱 백테스트(bar-v1)와 앱 시뮬레이션(종이 체결)으로만 검증합니다.",
+    "aux": {
+      "session": "국내 주간",
+      "orderType": "시장가",
+      "fillCond": "FAS",
+      "priceBasis": "신호가",
+      "buyPriceBasis": "",
+      "sellPriceBasis": "",
+      "stopBasis": "",
+      "perOrder": "1",
+      "maxHold": "1",
+      "addWhileOpen": false,
+      "stopTicks": "20",
+      "stopUnit": "pct",
+      "takeTicks": "",
+      "takeUnit": "tick",
+      "trailTicks": "",
+      "trailUnit": "tick",
+      "sessionEndFlat": false,
+      "sessionEndMinutes": "",
+      "entryStart": "",
+      "entryEnd": "",
+      "reentryWaitBars": "0",
+      "maxEntriesPerDay": "",
+      "lossStreak": "",
+      "dailyLoss": "5000000",
+      "marginBudget": "100000000"
+    },
+    "rules": {
+      "buyEntry": {
+        "on": true,
+        "resetBars": "",
+        "steps": [
+          {
+            "id": "s1",
+            "join": "all",
+            "withinBars": 0,
+            "conds": [
+              {
+                "id": "c1",
+                "left": "close",
+                "op": "gt",
+                "right": "ma",
+                "rightKind": "operand",
+                "rightParams": {
+                  "period": 100
+                }
+              },
+              {
+                "id": "c2",
+                "left": "rsi",
+                "leftParams": {
+                  "period": 3
+                },
+                "op": "lt",
+                "right": "30",
+                "rightKind": "number"
+              }
+            ]
+          }
+        ]
+      },
+      "sellEntry": {
+        "on": false,
+        "resetBars": "",
+        "steps": []
+      },
+      "buyExit": {
+        "on": true,
+        "resetBars": "",
+        "steps": [
+          {
+            "id": "s2",
+            "join": "all",
+            "withinBars": 0,
+            "conds": [
+              {
+                "id": "c3",
+                "left": "close",
+                "op": "gt",
+                "right": "ma",
+                "rightKind": "operand",
+                "rightParams": {
+                  "period": 10
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "sellExit": {
+        "on": false,
+        "resetBars": "",
+        "steps": []
+      }
+    }
+  }
+}
