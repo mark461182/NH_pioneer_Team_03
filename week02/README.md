@@ -21,6 +21,9 @@
 | --- | --- |
 | `README.md` | 이 보고서 |
 | [strategy.json](strategy.json) | 앱 전략주문 탭에 넣는 S4 설정 (`version`·`draft`) |
+| [strategy_check.json](strategy_check.json) | 앱 동작 확인용 5분봉 설정 — 전략 평가 대상 아님 (3-4절) |
+| [fetch_minute.py](fetch_minute.py) | `국내_차트(분)` 으로 연결 1분봉 수집 |
+| [check_frequency.py](check_frequency.py) | 확인용 설정이 장중에 거래를 낼지 1분봉으로 미리 셈 |
 | [nh_client.py](nh_client.py) | NH선물 REST 최소 클라이언트 — 토큰 발급, 시세 조회만 (주문 함수 없음) |
 | [fetch_daily.py](fetch_daily.py) | `국내_차트(일)` 로 연결 일봉 수집, 롤오버 수정가 생성 |
 | [backtest_daily.py](backtest_daily.py) | 문헌 기본값 4전략 백테스트 |
@@ -89,7 +92,7 @@ python risk_lag_check.py        # → results/risk_lag_check.json
 - 다른 사람이 다시 돌려도 `risk_layer_daily.csv`·`risk_layer_strategy_returns.csv`·`risk_layer_summary.json` 이 바이트 단위로 같게 나왔습니다(2026-10-29, 이건준 확인).
 - `team/risk_is_check.py`·`risk_layer.py`·`risk_futures.py` 는 같은 계산을 표로 풀어 `team/*_report.md` 로 씁니다(저장소에는 올리지 않음 — 내용은 이 README 6-4·7-3절에 합침).
 
-### 2-3. 앱 전략 재현 (S4)
+### 2-3. 앱 전략 재현 (S4 + 동작 확인용)
 
 [NH FUTURES API](https://github.com/PetterChanHyuk/nh-futures-open-api) 를 설치하고 국내 APP Key·Secret Key 를 앱 설정 화면에 넣습니다.
 
@@ -103,7 +106,17 @@ curl -X PUT "http://127.0.0.1:8000/api/strategy/versions/team03-w2-k200-s4-rsi-p
   --data-binary @strategy.json
 ```
 
-`strategy.json` 은 월물 코드 대신 품목(코스피200 선물)만 들고 있고, 종목코드는 앱이 그때의 종목 마스터에서 찾습니다.
+확인용 설정도 같은 방법으로 넣습니다.
+
+```bash
+curl -X PUT "http://127.0.0.1:8000/api/strategy/versions/team03-w2-k200-check-5m-rsi" \
+  -H "Content-Type: application/json" \
+  --data-binary @strategy_check.json
+```
+
+두 파일 모두 월물 코드 대신 품목(코스피200 선물)만 들고 있고, 종목코드는 앱이 그때의 종목 마스터에서 찾습니다.
+
+확인용 설정이 장중에 거래를 내는지는 `python check_frequency.py` 로 미리 봤습니다(1분봉은 `python fetch_minute.py` 로 받음, 키 필요).
 
 ## 3. 전략과 매매 계획
 
@@ -177,6 +190,22 @@ curl -X PUT "http://127.0.0.1:8000/api/strategy/versions/team03-w2-k200-s4-rsi-p
 | 손절 | 진입가 대비 **−20%** | 앱은 손절 칸이 필수입니다. 2000~2026 백테스트 241거래의 최대 역행이 −19.28% 라, −20% 는 과거에 한 번도 닿지 않는 거리입니다. 규칙을 바꾸지 않는 재해 방어용입니다 |
 | 세션 끝 정리 | 끔 | 여러 날 보유하는 전략 |
 | 하루 손실 한도 | 5,000,000원 | 1계약 명목(약 2.1억원)의 약 2.4% |
+
+**앱 동작 확인용 설정 ([strategy_check.json](strategy_check.json)) — 전략 평가 대상이 아닙니다**
+
+S4 는 일봉이라 금요일 15:45 마감에 한 번 판정하고, 주문은 다음 거래 창(월요일 09:00)에 나갑니다. 게다가 지금은 추세 조건이 거짓(6-5절)이라 제출 마감 전에는 주문·체결을 볼 수 없습니다. 그래서 **앱의 주문 → 체결 → 청산 흐름**을 보려고 S4 의 RSI 눌림목·MA 청산을 5분봉으로 옮긴 실행을 따로 세웁니다.
+
+| 칸 | 값 | 까닭 |
+| --- | --- | --- |
+| 기준 봉 / 평가 | 5분봉 / 마감 | 장중에 여러 번 판정 |
+| 매수 진입 | `RSI(3) < 30` | S4 와 같은 눌림목 조건. 추세 필터는 뺌 — 넣으면 지금 장에서 진입이 없음 |
+| 매수 청산 | `close > MA(10)` | S4 와 같은 청산 조건 |
+| 주문 | 시장가 · FAS · 1계약 · 최대 보유 1 · **하루 진입 3번까지** | 기록을 읽을 수 있는 양으로 제한 |
+| 손절 | **100틱 (5pt, 1계약 125만원)** | 20틱이면 지수 850 에서 너무 좁아 77% 가 손절로 끝남. 100틱이면 규칙 청산 59% · 손절 41% 로 두 경로가 다 보임 |
+| 세션 끝 정리 | 켬, 10분 전 | 하루 안에 끝나는 실행 |
+| 하루 손실 한도 | 5,000,000원 | 손절 3번(375만원)보다 큼 |
+
+미리 본 빈도 (`results/check_frequency.json`, 2026-09-01 ~ 10-22 의 1분봉을 5분봉으로 묶어 같은 규칙): 34거래일 모두 거래가 있었고 하루 3번(상한), 청산은 규칙 59% · 손절 41% 였습니다. **수익성은 검증하지 않았고, 이 실행의 손익은 전략 성과로 해석하지 않습니다.**
 
 ### 3-5. 리스크 레이어 (강민영)
 
@@ -265,6 +294,7 @@ S1·S2·S3·S4 (원안 그대로) → 합친 수익 (노출 1)
 | `backtest_daily.json` · `backtest_daily_equity.csv` | 문헌 기본값: 전체·연도별·구간·상관·민감도, 전략별 누적 곡선 |
 | `optimize_daily.json` | 전략별 조합 수, 학습 샤프 분포, 기본값·상위 3의 학습/검증 지표, 조합 지표 |
 | `oos_analysis.json` | 검증 구간 변동성·최대 하락·월별 수익·상관·거래 목록 |
+| `k200_1m_continuous.csv` · `check_frequency.json` | 연결 1분봉 (2025-10-10 ~ 2026-10-22), 확인용 설정의 거래 빈도 |
 | `risk_layer_summary.json` | 리스크 레이어: 한도 숫자, 학습·검증 성과, 위험 측정, 사후검증, 결정 규칙 비율, 전략별, 위기 구간, 연도별, 증거금, 갭, 슬리피지, 정수 계약, 민감도 36 |
 | `risk_layer_daily.csv` | 날마다 원안 수익, ①②③ 노출, 최종 노출, 결정 규칙, 레이어 후 수익, 그림자 낙폭 |
 | `risk_layer_strategy_returns.csv` | 리스크 레이어 입력 — 4전략 일수익률 (튜닝 1위) |
@@ -450,18 +480,23 @@ S1·S2·S3·S4 (원안 그대로) → 합친 수익 (노출 1)
 
 ![민감도](results/risk_layer_sensitivity.png)
 
-### 6-5. 앱 백테스트와 앱 시뮬레이션 (S4)
+### 6-5. 앱 백테스트와 앱 시뮬레이션
 
 > 실행 환경: **앱 백테스트(`bar-v1`) + 앱 시뮬레이션(종이 체결)**. 계좌 주문 없음, 모의계좌 체결 아님.
 > 실행 일시: 2026-10-30 (국내 주간) — 캡처·기록 추가 후 이 절을 채웁니다.
 
-**실행 전 예상.** 2026-10-26 종가 850.00 이 SMA(100) 1,123.93 보다 한참 아래라 진입 조건 ①이 거짓입니다(RSI(3) 28.21 은 조건 ② 충족). 그래서 앱 시뮬레이션은 **판정만 하고 주문은 0건**일 것으로 예상합니다. 이 실행의 목적은 수익이 아니라 「앱이 같은 규칙을 같은 봉에서 판정하는지」 확인입니다.
+| 실행 | 설정 | 목적 | 실행 전 예상 |
+| --- | --- | --- | --- |
+| ① S4 | [strategy.json](strategy.json) | 앱이 같은 규칙을 같은 봉에서 판정하는지 | 15:45 마감 판정 1번, **주문 0건** |
+| ② 동작 확인용 | [strategy_check.json](strategy_check.json) | 주문 → 체결 → 청산(규칙·손절·세션 끝) 흐름 | 장중 진입 최대 3번 |
+
+**① S4 가 주문 0건일 까닭.** 2026-10-26 종가 850.00 이 SMA(100) 1,123.93 보다 한참 아래라 진입 조건 「종가 > MA(100)」이 거짓입니다(RSI(3) 28.21 은 조건 충족). 추세 기준을 SMA150(1,081)·SMA200(1,004)으로 바꿔도 거짓이라, 숫자를 바꿔 주문을 만들지 않았습니다. 또 일봉 신호의 주문은 다음 거래 창에 나가므로, 금요일 신호가 있었더라도 체결은 월요일입니다.
 
 | 확인할 것 | 근거 파일 / 캡처 |
 | --- | --- |
-| 앱 백테스트 거래 일자가 6-3절 S4 거래 목록과 같은지 | `results/app_backtest_*.json`, `screenshots/` |
-| 앱 시뮬레이션이 일봉 마감에서 판정했는지, 판정 당시 MA(100)·RSI(3) 값 | `results/journal_*.jsonl`, `screenshots/` |
-| 주문 0건이면 그 까닭이 진입 조건 ①(추세)인지 | 실행 기록의 판정 줄 |
+| ① 앱 백테스트 거래 일자가 6-3절 S4 거래 목록과 같은지 | `results/app_backtest_*.json`, `screenshots/` |
+| ① 15:45 일봉 마감 판정과 그때의 MA(100)·RSI(3) 값, 진입 안 한 까닭 | `results/journal_*.jsonl`, `screenshots/` |
+| ② 진입·체결 가격, 청산 사유(규칙·손절·세션 끝), 하루 3번 상한 작동 | `results/journal_*.jsonl`, `screenshots/` |
 
 ## 7. 해석과 한계
 
