@@ -17,3 +17,7 @@ venv/
 .idea/
 .DS_Store
 Thumbs.db
+
+# 2주차 리스크 레이어 스크립트가 실행할 때 만드는 중간 보고서 (README 에 합쳐 둠)
+week02/team/*_report.md
+week02/team/replicate_oos.csv
