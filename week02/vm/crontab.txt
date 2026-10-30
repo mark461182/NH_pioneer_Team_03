@@ -1,0 +1,3 @@
+10 0 30 10 * /home/mark4611/nh_week02/auto.sh morning  # NH team03 week02 (09:10 KST)
+50 6 30 10 * /home/mark4611/nh_week02/auto.sh close  # NH team03 week02 (15:50 KST)
+30 7 * * 5 /home/mark4611/nh_week02/live_push.sh  # NH team03 weekly live report (Fri 16:30 KST)

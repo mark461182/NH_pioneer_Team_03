@@ -1,0 +1,10 @@
+2026-10-30 09:10:01 [morning] saved runs_morning_20261030_091001.json (2586 bytes)
+2026-10-30 09:10:01 [morning] saved snapshot_s4_morning_20261030_091001.json (1534 bytes)
+2026-10-30 09:10:01 [morning] saved snapshot_check_morning_20261030_091001.json (4586 bytes)
+2026-10-30 15:50:01 [close] saved runs_close_20261030_155001.json (2593 bytes)
+2026-10-30 15:50:01 [close] saved snapshot_s4_close_20261030_155001.json (2936 bytes)
+2026-10-30 15:50:01 [close] saved snapshot_check_close_20261030_155001.json (15069 bytes)
+2026-10-30 15:50:01 [close] end check run -> 200
+2026-10-30 15:50:04 [close] saved runs_after_end_20261030_155001.json (2589 bytes)
+2026-10-30 15:50:04 [close] saved snapshot_check_ended_20261030_155001.json (15168 bytes)
+2026-10-30 15:50:04 [close] copied strategy-trades.jsonl

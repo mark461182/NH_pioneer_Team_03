@@ -1,0 +1,16 @@
+[Unit]
+Description=NH FUTURES API backend (team03 week02 paper runs)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=mark4611
+WorkingDirectory=/home/mark4611/nh-futures-app
+Environment=PATH=/home/mark4611/.local/bin:/usr/bin:/bin
+Environment=TZ=Asia/Seoul
+ExecStart=/home/mark4611/.local/bin/uv run --no-dev uvicorn backend.main:app --host 127.0.0.1 --port 47100
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
