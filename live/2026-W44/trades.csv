@@ -1,0 +1,4 @@
+runId,record,side,quantity,openedAt,closedAt,avgEntry,avgExit,netPl,fee
+run-team03-w2-check,paper,buy,1,2026-10-30 08:50:00,2026-10-30 09:07:16,904.2,899.45,-1193662,6162
+run-team03-w2-check,paper,buy,1,2026-10-30 09:25:00,2026-10-30 09:42:30,897.65,892.75,-1231162,6162
+run-team03-w2-check,paper,buy,1,2026-10-30 09:50:00,2026-10-30 10:01:36,894.65,889.9,-1193662,6162
