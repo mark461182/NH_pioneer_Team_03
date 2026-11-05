@@ -8,11 +8,14 @@
        아래로 경계 e 를 뚫음 → 구간 [e-50, e) 의 불 물량을 봄
   3. 신호: 그 구간 물량 ≥ 300 이면 **돌파 반대 방향** 으로 MHI 1계약 (위로 뚫으면 매도, 아래로 뚫으면 매수)
   4. 청산: 이벤트 분 + 30분. 한 번에 한 포지션. 이벤트+30분이 16:00 을 넘으면 진입 안 함
+  5. 주문: NH 는 HKEX 시장가를 받지 않음 (7032, 11/05 확인) → **유리한 지정가** 로 냄
+       매수 = 기준가 + 150pt, 매도 = 기준가 − 150pt. 모의 서버는 지정가가 아니라 그 시점 가격으로 체결함
+       (11/05 시험: 매수 지정가 24,942 → 24,783 체결, 매도 지정가 24,635 → 24,791 체결)
 
 실행 모드
   python cbbc_fade.py                     # 기본: 신호·가상 체결만 기록 (키 불필요, 주문 없음)
   python cbbc_fade.py --paper-order --app-dir <nh-futures-open-api 폴더>
-                                          # 신호마다 **NH 모의계좌** MHI 시장가 주문 (실전 주문은 코드상 불가)
+                                          # 신호마다 **NH 모의계좌** MHI 지정가(±150pt) 주문 (실전 주문은 코드상 불가)
   python cbbc_fade.py --test-order --app-dir <...>
                                           # 모의계좌 MHI 1계약 매수 → 60초 뒤 매도, 체결되는지만 확인
   python cbbc_fade.py --price nh --app-dir <...>
@@ -51,12 +54,13 @@ SYM_ORDER = "MHIX26"   # 12월물로 넘어가면 MHIZ26
 SYM_PRICE = "HSIX26"
 ORDER_ENV = "paper"    # 주문은 모의 서버로만. 바꾸지 말 것
 POLL = 30              # 초
+LIMIT_OFFSET = 150     # 지정가 여유폭 pt — 기준가가 Yahoo 15분 지연이어도 바로 체결되도록
 
 OUT = Path(__file__).resolve().parent / "results" / dt.datetime.now(HKT).strftime("%Y%m%d")
 
 
 # ───────── 기록 ─────────
-SECRET = ("acnt", "acct", "account", "ac_no", "pwd", "passwd", "token", "key")
+SECRET = ("acnt", "acct", "account", "ac_no", "pwd", "passwd", "token", "key", "user_id", "ip_addr", "mac")
 
 
 def clean(x):
@@ -169,15 +173,20 @@ class Broker:
     def __init__(self, F, A, live: bool):
         self.F, self.A, self.live = F, A, live
 
-    def send(self, side: str, why: str):
+    def send(self, side: str, why: str, ref: float):
+        """ref = 기준가(지수 상당). 매수는 ref+LIMIT_OFFSET, 매도는 ref−LIMIT_OFFSET 지정가."""
+        px = None if ref != ref else int(round(ref + (LIMIT_OFFSET if side == "buy" else -LIMIT_OFFSET)))
         if not self.live:
-            log("가상주문", side=side, 이유=why)
+            log("가상주문", side=side, 이유=why, 기준가=ref, 지정가=px)
             return None
         assert ORDER_ENV == "paper"
+        if px is None:
+            log("주문보류", side=side, 이유=why, 오류="기준가 없음 (가격 받기 실패) — HTS 에서 직접 확인")
+            return None
         try:
-            r = self.F.order(SYM_ORDER, qt_div_cd="1", trd_div_cd=self.A.SIDE_CODE[side], glb_ord_tp_cd="1",
-                             ord_qty="1", ord_pric="0", stop_pric="", environment=ORDER_ENV)
-            log("모의주문", side=side, 이유=why, 주문번호=str(r.get("ord_no", "")).strip(),
+            r = self.F.order(SYM_ORDER, qt_div_cd="1", trd_div_cd=self.A.SIDE_CODE[side], glb_ord_tp_cd="2",
+                             ord_qty="1", ord_pric=str(px), stop_pric="", environment=ORDER_ENV)
+            log("모의주문", side=side, 이유=why, 지정가=px, 주문번호=str(r.get("ord_no", "")).strip(),
                 오류=str(r.get("err_cd", "")).strip() + " " + str(r.get("err_msg", "")).strip(), raw=r)
             return r
         except Exception as e:
@@ -222,10 +231,12 @@ def main():
         if input(f"모의계좌({ORDER_ENV})에 {SYM_ORDER} 1계약 매수 후 60초 뒤 매도합니다. 진행하려면 YES: ").strip() != "YES":
             return
         b = Broker(F, A, live=True)
-        b.send("buy", "체결 시험")
+        g = yf_bars()
+        ref = float(g["Close"].iloc[-1]) if len(g) else float("nan")
+        b.send("buy", "체결 시험", ref)
         time.sleep(60)
         b.fills()
-        b.send("sell", "체결 시험 청산")
+        b.send("sell", "체결 시험 청산", ref)
         time.sleep(20)
         b.fills()
         return
@@ -248,7 +259,7 @@ def main():
 
         # 청산
         if pos and now >= pos["exit_at"]:
-            broker.send("buy" if pos["side"] == "sell" else "sell", "30분 청산")
+            broker.send("buy" if pos["side"] == "sell" else "sell", "30분 청산", last)
             pos["exit_px"] = last
             sgn = 1 if pos["side"] == "buy" else -1
             pos["pnl_pt_virtual"] = sgn * (last - pos["entry_px"]) - COST if last == last else np.nan
@@ -279,7 +290,7 @@ def main():
                 log("건너뜀", 이유="청산 시각이 16:00 넘음")
             else:
                 side = "sell" if ev["dir"] == "up" else "buy"
-                broker.send(side, f"{ev['dir']} {ev['edge']:.0f} 돌파, 물량 {ev['qty']:.0f}")
+                broker.send(side, f"{ev['dir']} {ev['edge']:.0f} 돌파, 물량 {ev['qty']:.0f}", last)
                 pos = {"event_t": ev["time"].strftime("%H:%M"), "dir": ev["dir"], "edge": ev["edge"],
                        "qty": round(ev["qty"], 1), "side": side, "entry_t": now.strftime("%H:%M:%S"),
                        "entry_px": last, "lag_min": round(lag, 1), "exit_at": exit_at}
