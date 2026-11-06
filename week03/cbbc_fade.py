@@ -271,7 +271,7 @@ def main():
 
         # 새 이벤트
         for ev in events(g, Q) if len(g) else []:
-            key = (ev["dir"], ev["edge"])
+            key = (ev["time"].strftime("%Y%m%d"), ev["dir"], ev["edge"])   # 날짜 포함 — 장 전엔 Yahoo 가 전날 봉을 줌
             if key in seen:
                 continue
             seen.add(key)
