@@ -13,6 +13,7 @@
 import argparse
 import datetime as dt
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -29,6 +30,8 @@ def clean(x):
         return {k: ("***" if any(h in k.lower() for h in HIDE) else clean(v)) for k, v in x.items()}
     if isinstance(x, list):
         return [clean(v) for v in x]
+    if isinstance(x, str):          # 오류 문구 안의 키 값도 가림 (설정 파일 파싱 오류가 키 줄을 인용함)
+        return re.sub(r"(app_?(?:key|secret)\W{0,6})[A-Za-z0-9+/=_-]{6,}", r"\1***", x, flags=re.I)
     return x
 
 
