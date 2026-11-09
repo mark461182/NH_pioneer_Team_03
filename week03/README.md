@@ -188,7 +188,7 @@ CBBC 는 홍콩 발행사가 상장하는 레버리지 상품입니다. 불은 �
 | 해외 주문 | `order(qt_div_cd=1, glb_ord_tp_cd=2 지정가, ord_pric=기준가±150, ord_qty=1)` | 진입·청산 | **모의만** (코드에 `ORDER_ENV = "paper"` 고정). 시장가(`1`)는 HKEX 에서 거부 |
 | 해외 주문내역 | `order_history(inq_div=2 체결, prd_cd=MHI)` | 체결 확인 | 모의 |
 | 해외 주문가능수량 | `orderable_quantity` | 사전 점검 | 모의 |
-| 해외 차트(분) | `chart_minute(HSIX26, FHKEX)` | 지연 없는 신호 (`--price nh`) | 실전 (조회만) |
+| 해외 차트(분) | `chart_minute(HSIX26, FHKE)` | 지연 없는 신호 (`--price nh`) | 실전 (조회만) |
 | 해외 현재가·호가 | `price`·`bid_price` | 시세 권한 확인 (`nh_hk_check.py`) | 실전 (조회만) |
 | 품목별세부정보 | `product_detail` | HKEX 상품 존재·틱 확인 | 모의 |
 

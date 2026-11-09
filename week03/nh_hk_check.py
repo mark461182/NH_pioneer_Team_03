@@ -30,7 +30,7 @@ for name in dir(F):
         setattr(F, name, lambda *a, **k: (_ for _ in ()).throw(RuntimeError("이 스크립트는 주문 금지")))
 
 ENV = "real"
-SYMS = [("FHKEX", "HSIX26"), ("FHKEX", "MHIX26")]   # 11월물. 12월로 넘어가면 Z26
+SYMS = [("FHKE", "HSIX26"), ("FHKE", "MHIX26")]   # 11월물. 12월로 넘어가면 Z26
 OUT = Path("out_hk")
 LOG = []
 
@@ -77,8 +77,8 @@ def minutes(ex, sym, days):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=5)
-    ap.add_argument("--env", default="real", help="real(기본) / paper — 모의 서버엔 HKEX 시세가 없음")
-    ap.add_argument("--sym", action="append", help="거래소:종목, 예) FHKEX:HSIZ26 (여러 번 가능)")
+    ap.add_argument("--env", default="real", help="real(기본) / paper")
+    ap.add_argument("--sym", action="append", help="거래소:종목, 예) FHKE:HSIZ26 (여러 번 가능)")
     a = ap.parse_args()
     global ENV, SYMS
     ENV = a.env

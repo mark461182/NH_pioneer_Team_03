@@ -131,7 +131,7 @@ class NHPrice:
 
     def bars(self) -> pd.DataFrame:
         today = dt.datetime.now(HKT).strftime("%Y%m%d")
-        r = self.F.chart_minute(SYM_PRICE, exch_cd="FHKEX", inq_strt_dt=today, inq_ed_dt=today, environment="real")
+        r = self.F.chart_minute(SYM_PRICE, exch_cd="FHKE", inq_strt_dt=today, inq_ed_dt=today, environment="real")
         rows = r.get("Occurs1") or []
         if not rows:
             return pd.DataFrame()
