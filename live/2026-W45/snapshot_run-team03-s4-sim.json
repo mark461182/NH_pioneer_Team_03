@@ -1,0 +1,440 @@
+{
+ "run": {
+  "id": "run-team03-s4-sim",
+  "version": "team03-w2-k200-s4-rsi-pullback",
+  "code": "A016C000",
+  "session": "domestic-day",
+  "sessionLabel": "국내 주간",
+  "market": "domestic",
+  "mode": "sim",
+  "approvedAt": 1793670743225,
+  "state": "armed",
+  "stateLabel": "감시 중",
+  "feed": "live",
+  "feedAt": 1794189299288,
+  "qty": 1,
+  "cash": 100000000.0,
+  "margin": 41119575.0,
+  "position": 0,
+  "side": null,
+  "avgPrice": null,
+  "pl": 0.0,
+  "realizedPl": 0.0,
+  "openPl": 0.0,
+  "dayPl": 0.0,
+  "lossStreak": 0,
+  "fee": 0.0,
+  "environment": "paper",
+  "budgetUnchecked": false,
+  "multiplierWhy": null,
+  "currency": "KRW",
+  "evalMode": "마감",
+  "lastPrice": 794.25,
+  "tickSize": 0.05,
+  "multiplier": 250000.0,
+  "daysLeft": 32,
+  "expiring": false,
+  "initialMarginRate": "21.00%",
+  "maintenanceMarginRate": "14.00%",
+  "maintenanceMargin": null,
+  "model": "sim-v1",
+  "bars": 226,
+  "warmup": 200,
+  "pending": 0,
+  "openEntry": 0,
+  "perContract": 41119575.0,
+  "perContractBasis": "margin",
+  "marginBudget": 100000000.0,
+  "marginUsed": 0.0,
+  "marginLeft": 100000000.0,
+  "bid1": 794.15,
+  "ask1": 794.35,
+  "bid1Qty": 2.0,
+  "ask1Qty": 5.0,
+  "quoteAt": 1794189300000,
+  "expectedOrder": {
+   "buy": {
+    "orderType": "시장가",
+    "price": null,
+    "stopPrice": null
+   },
+   "sell": {
+    "orderType": "시장가",
+    "price": null,
+    "stopPrice": null
+   },
+   "exit": null
+  },
+  "unsentToday": 0,
+  "signalCount": 0,
+  "fillCount": 0,
+  "lastSignalAt": null
+ },
+ "conditions": {
+  "barTime": 1793890800000,
+  "state": "ready",
+  "need": 200,
+  "have": 226,
+  "rules": [
+   {
+    "rule": "buyEntry",
+    "judged": true,
+    "waitingStep": 1,
+    "steps": 1,
+    "barsLeft": null,
+    "resetLeft": null,
+    "fired": false,
+    "stepsDetail": [
+     {
+      "join": "all",
+      "withinBars": 0,
+      "conds": [
+       {
+        "left": "close",
+        "op": "gt",
+        "right": "ma",
+        "rightKind": "operand",
+        "leftParams": null,
+        "rightParams": {
+         "period": 100
+        },
+        "leftValue": 782.95,
+        "rightValue": 1092.9685000000006,
+        "now": false,
+        "before": false
+       },
+       {
+        "left": "rsi",
+        "op": "lt",
+        "right": "30",
+        "rightKind": "number",
+        "leftParams": {
+         "period": 3
+        },
+        "rightParams": null,
+        "leftValue": 9.629119417799103,
+        "rightValue": 30.0,
+        "now": true,
+        "before": true
+       }
+      ],
+      "stepNow": false,
+      "stepBefore": false,
+      "beforeUnknown": false
+     }
+    ]
+   },
+   {
+    "rule": "buyExit",
+    "judged": false,
+    "waitingStep": 1,
+    "steps": 1,
+    "barsLeft": null,
+    "resetLeft": null,
+    "fired": false,
+    "stepsDetail": [
+     {
+      "join": "all",
+      "withinBars": 0,
+      "conds": [
+       {
+        "left": "close",
+        "op": "gt",
+        "right": "ma",
+        "rightKind": "operand",
+        "leftParams": null,
+        "rightParams": {
+         "period": 10
+        },
+        "leftValue": 782.95,
+        "rightValue": 882.6550000000004,
+        "now": false,
+        "before": false
+       }
+      ],
+      "stepNow": false,
+      "stepBefore": false,
+      "beforeUnknown": false
+     }
+    ]
+   }
+  ]
+ },
+ "fills": [],
+ "events": [
+  {
+   "time": 1793670743230,
+   "runId": "run-team03-s4-sim",
+   "kind": "state",
+   "text": "검증 실행을 세웠습니다"
+  },
+  {
+   "time": 1793670743230,
+   "runId": "run-team03-s4-sim",
+   "kind": "ready",
+   "text": "준비 봉 조회 222줄 — 새 봉 222개(지금 222개)"
+  },
+  {
+   "time": 1793670744560,
+   "runId": "run-team03-s4-sim",
+   "kind": "state",
+   "text": "계좌와 맞춰 보는 중입니다"
+  },
+  {
+   "time": 1793670744560,
+   "runId": "run-team03-s4-sim",
+   "kind": "state",
+   "text": "계좌와 장부가 맞습니다"
+  },
+  {
+   "time": 1793688300217,
+   "runId": "run-team03-s4-sim",
+   "kind": "session",
+   "text": "세션이 끝났습니다"
+  },
+  {
+   "time": 1793688330317,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "데이터 공백 — 체결이 오지 않습니다(마지막 수신 15:45:00)"
+  },
+  {
+   "time": 1793749500167,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "시세가 다시 들어옵니다"
+  },
+  {
+   "time": 1793774700190,
+   "runId": "run-team03-s4-sim",
+   "kind": "session",
+   "text": "세션이 끝났습니다"
+  },
+  {
+   "time": 1793774730274,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "데이터 공백 — 체결이 오지 않습니다(마지막 수신 15:45:00)"
+  },
+  {
+   "time": 1793835900158,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "시세가 다시 들어옵니다"
+  },
+  {
+   "time": 1793861100167,
+   "runId": "run-team03-s4-sim",
+   "kind": "session",
+   "text": "세션이 끝났습니다"
+  },
+  {
+   "time": 1793861130262,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "데이터 공백 — 체결이 오지 않습니다(마지막 수신 15:45:00)"
+  },
+  {
+   "time": 1793866065062,
+   "runId": "run-team03-s4-sim",
+   "kind": "ready",
+   "text": "준비 봉 조회 222줄 — 새 봉 0개, 갱신 222개(지금 225개)"
+  },
+  {
+   "time": 1793866065643,
+   "runId": "run-team03-s4-sim",
+   "kind": "state",
+   "text": "계좌와 맞춰 보는 중입니다"
+  },
+  {
+   "time": 1793866065643,
+   "runId": "run-team03-s4-sim",
+   "kind": "state",
+   "text": "재접속 뒤 대사 일치 — 감시를 이어 갑니다",
+   "reason": "reconcile-resume"
+  },
+  {
+   "time": 1793922300138,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "시세가 다시 들어옵니다"
+  },
+  {
+   "time": 1793922330153,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "데이터 공백 — 체결이 오지 않습니다(마지막 수신 08:45:00)"
+  },
+  {
+   "time": 1793922371370,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "시세가 다시 들어옵니다"
+  },
+  {
+   "time": 1793922591595,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "데이터 공백 — 체결이 오지 않습니다(마지막 수신 08:49:21)"
+  },
+  {
+   "time": 1793922591901,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "시세가 다시 들어옵니다"
+  },
+  {
+   "time": 1793922714850,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "데이터 공백 — 체결이 오지 않습니다(마지막 수신 08:51:24)"
+  },
+  {
+   "time": 1793922742835,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "시세가 다시 들어옵니다"
+  },
+  {
+   "time": 1793922772861,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "데이터 공백 — 체결이 오지 않습니다(마지막 수신 08:52:22)"
+  },
+  {
+   "time": 1793922801059,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "시세가 다시 들어옵니다"
+  },
+  {
+   "time": 1793922831081,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "데이터 공백 — 체결이 오지 않습니다(마지막 수신 08:53:21)"
+  },
+  {
+   "time": 1793922856529,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "시세가 다시 들어옵니다"
+  },
+  {
+   "time": 1793922895302,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "데이터 공백 — 체결이 오지 않습니다(마지막 수신 08:54:25)"
+  },
+  {
+   "time": 1793922918005,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "시세가 다시 들어옵니다"
+  },
+  {
+   "time": 1793922968390,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "데이터 공백 — 체결이 오지 않습니다(마지막 수신 08:55:38)"
+  },
+  {
+   "time": 1793922976329,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "시세가 다시 들어옵니다"
+  },
+  {
+   "time": 1793923006354,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "데이터 공백 — 체결이 오지 않습니다(마지막 수신 08:56:16)"
+  },
+  {
+   "time": 1793923033022,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "시세가 다시 들어옵니다"
+  },
+  {
+   "time": 1793923124113,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "데이터 공백 — 체결이 오지 않습니다(마지막 수신 08:58:14)"
+  },
+  {
+   "time": 1793923129305,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "시세가 다시 들어옵니다"
+  },
+  {
+   "time": 1793923442517,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "데이터 공백 — 체결이 오지 않습니다(마지막 수신 09:03:32)"
+  },
+  {
+   "time": 1793925214112,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "시세가 다시 들어옵니다"
+  },
+  {
+   "time": 1793947500223,
+   "runId": "run-team03-s4-sim",
+   "kind": "session",
+   "text": "세션이 끝났습니다"
+  },
+  {
+   "time": 1793947530236,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "데이터 공백 — 체결이 오지 않습니다(마지막 수신 15:45:00)"
+  },
+  {
+   "time": 1794085622350,
+   "runId": "run-team03-s4-sim",
+   "kind": "ready",
+   "text": "준비 봉 조회 223줄 — 새 봉 0개, 갱신 223개(지금 226개)"
+  },
+  {
+   "time": 1794085623246,
+   "runId": "run-team03-s4-sim",
+   "kind": "state",
+   "text": "계좌와 맞춰 보는 중입니다"
+  },
+  {
+   "time": 1794085623246,
+   "runId": "run-team03-s4-sim",
+   "kind": "state",
+   "text": "재접속 뒤 대사 일치 — 감시를 이어 갑니다",
+   "reason": "reconcile-resume"
+  },
+  {
+   "time": 1794181500116,
+   "runId": "run-team03-s4-sim",
+   "kind": "gap",
+   "text": "시세가 다시 들어옵니다"
+  }
+ ],
+ "openOrders": [],
+ "curve": [
+  {
+   "time": 1793631600000,
+   "equity": 100000000.0
+  },
+  {
+   "time": 1793718000000,
+   "equity": 100000000.0
+  },
+  {
+   "time": 1793804400000,
+   "equity": 100000000.0
+  },
+  {
+   "time": 1793890800000,
+   "equity": 100000000.0
+  }
+ ],
+ "trades": []
+}

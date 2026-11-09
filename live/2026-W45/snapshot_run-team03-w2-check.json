@@ -1,0 +1,120 @@
+{
+ "run": {
+  "id": "run-team03-w2-check",
+  "version": "team03-w2-k200-check-5m-rsi",
+  "code": "A016C000",
+  "session": "domestic-day",
+  "sessionLabel": "국내 주간",
+  "market": "domestic",
+  "mode": "paper",
+  "approvedAt": null,
+  "state": "ended",
+  "stateLabel": "종료",
+  "feed": "idle",
+  "feedAt": 0,
+  "qty": 1,
+  "cash": 100000000.0,
+  "margin": 41119575.0,
+  "position": 0,
+  "side": null,
+  "avgPrice": null,
+  "pl": 0.0,
+  "realizedPl": 0.0,
+  "openPl": 0.0,
+  "dayPl": 0.0,
+  "lossStreak": 0,
+  "fee": 0.0,
+  "environment": null,
+  "budgetUnchecked": false,
+  "multiplierWhy": null,
+  "currency": "KRW",
+  "evalMode": "마감",
+  "lastPrice": null,
+  "tickSize": 1.0,
+  "multiplier": 250000.0,
+  "daysLeft": 32,
+  "expiring": false,
+  "initialMarginRate": "21.00%",
+  "maintenanceMarginRate": "14.00%",
+  "maintenanceMargin": null,
+  "model": "paper-v2",
+  "bars": 0,
+  "warmup": 20,
+  "pending": 0,
+  "openEntry": 0,
+  "perContract": 41119575.0,
+  "perContractBasis": "margin",
+  "marginBudget": 100000000.0,
+  "marginUsed": 0.0,
+  "marginLeft": 100000000.0,
+  "bid1": null,
+  "ask1": null,
+  "bid1Qty": null,
+  "ask1Qty": null,
+  "quoteAt": null,
+  "expectedOrder": {
+   "buy": null,
+   "sell": null,
+   "exit": null
+  },
+  "unsentToday": 0,
+  "signalCount": null,
+  "fillCount": null,
+  "lastSignalAt": null
+ },
+ "conditions": null,
+ "fills": [],
+ "events": [
+  {
+   "time": 1793687100005,
+   "runId": "run-team03-w2-check",
+   "kind": "session",
+   "text": "세션 끝 정리 — 보유를 닫고 새로 들어가지 않습니다"
+  },
+  {
+   "time": 1793688300010,
+   "runId": "run-team03-w2-check",
+   "kind": "session",
+   "text": "세션이 끝났습니다"
+  },
+  {
+   "time": 1793773500098,
+   "runId": "run-team03-w2-check",
+   "kind": "session",
+   "text": "세션 끝 정리 — 보유를 닫고 새로 들어가지 않습니다"
+  },
+  {
+   "time": 1793774700078,
+   "runId": "run-team03-w2-check",
+   "kind": "session",
+   "text": "세션이 끝났습니다"
+  },
+  {
+   "time": 1793859900004,
+   "runId": "run-team03-w2-check",
+   "kind": "session",
+   "text": "세션 끝 정리 — 보유를 닫고 새로 들어가지 않습니다"
+  },
+  {
+   "time": 1793861100059,
+   "runId": "run-team03-w2-check",
+   "kind": "session",
+   "text": "세션이 끝났습니다"
+  },
+  {
+   "time": 1793946300071,
+   "runId": "run-team03-w2-check",
+   "kind": "session",
+   "text": "세션 끝 정리 — 보유를 닫고 새로 들어가지 않습니다"
+  },
+  {
+   "time": 1793947500013,
+   "runId": "run-team03-w2-check",
+   "kind": "session",
+   "text": "세션이 끝났습니다"
+  }
+ ],
+ "openOrders": [],
+ "curve": [],
+ "trades": []
+}
