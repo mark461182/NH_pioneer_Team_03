@@ -44,7 +44,7 @@ def log(kind, **kw):
 
 def ref_price(F):
     try:
-        r = F.price([("FHKEX", SYM)], environment="real")
+        r = F.price([("FHKE", SYM)], environment="real")
         rows = r.get("Occurs1") or []
         p = float(rows[0].get("occurs1_last_pric"))
         if p > 0:
