@@ -1,0 +1,202 @@
+{
+ "run": {
+  "id": "run-team03-s4-paper",
+  "version": "team03-w2-k200-s4-rsi-pullback",
+  "code": "A016C000",
+  "session": "domestic-day",
+  "sessionLabel": "국내 주간",
+  "market": "domestic",
+  "mode": "paper",
+  "approvedAt": null,
+  "state": "paused",
+  "stateLabel": "중지",
+  "feed": "gap",
+  "feedAt": 1794552300181,
+  "qty": 1,
+  "cash": 100000000.0,
+  "margin": 43762425.0,
+  "position": 0,
+  "side": null,
+  "avgPrice": null,
+  "pl": 0.0,
+  "realizedPl": 0.0,
+  "openPl": 0.0,
+  "dayPl": 0.0,
+  "lossStreak": 0,
+  "fee": 0.0,
+  "environment": null,
+  "budgetUnchecked": false,
+  "multiplierWhy": null,
+  "currency": "KRW",
+  "evalMode": "마감",
+  "lastPrice": 822.35,
+  "tickSize": 1.0,
+  "multiplier": 250000.0,
+  "daysLeft": 28,
+  "expiring": false,
+  "initialMarginRate": "21.00%",
+  "maintenanceMarginRate": "14.00%",
+  "maintenanceMargin": null,
+  "model": "paper-v2",
+  "bars": 2,
+  "warmup": 200,
+  "pending": 0,
+  "openEntry": 0,
+  "perContract": 43762425.0,
+  "perContractBasis": "margin",
+  "marginBudget": 100000000.0,
+  "marginUsed": 0.0,
+  "marginLeft": 100000000.0,
+  "bid1": null,
+  "ask1": null,
+  "bid1Qty": null,
+  "ask1Qty": null,
+  "quoteAt": null,
+  "expectedOrder": {
+   "buy": {
+    "orderType": "시장가",
+    "price": null,
+    "stopPrice": null
+   },
+   "sell": {
+    "orderType": "시장가",
+    "price": null,
+    "stopPrice": null
+   },
+   "exit": null
+  },
+  "unsentToday": 0,
+  "signalCount": null,
+  "fillCount": null,
+  "lastSignalAt": null
+ },
+ "conditions": {
+  "barTime": 1794495600000,
+  "state": "warmup",
+  "need": 200,
+  "have": 2,
+  "rules": [
+   {
+    "rule": "buyEntry",
+    "judged": false,
+    "waitingStep": 1,
+    "steps": 1,
+    "barsLeft": null,
+    "resetLeft": null,
+    "fired": null,
+    "stepsDetail": [
+     {
+      "join": "all",
+      "withinBars": 0,
+      "conds": [
+       {
+        "left": "close",
+        "op": "gt",
+        "right": "ma",
+        "rightKind": "operand",
+        "leftValue": null,
+        "rightValue": null,
+        "now": null,
+        "before": null
+       },
+       {
+        "left": "rsi",
+        "op": "lt",
+        "right": "30",
+        "rightKind": "number",
+        "leftValue": null,
+        "rightValue": null,
+        "now": null,
+        "before": null
+       }
+      ],
+      "stepNow": null,
+      "stepBefore": null,
+      "beforeUnknown": null
+     }
+    ]
+   },
+   {
+    "rule": "buyExit",
+    "judged": false,
+    "waitingStep": 1,
+    "steps": 1,
+    "barsLeft": null,
+    "resetLeft": null,
+    "fired": null,
+    "stepsDetail": [
+     {
+      "join": "all",
+      "withinBars": 0,
+      "conds": [
+       {
+        "left": "close",
+        "op": "gt",
+        "right": "ma",
+        "rightKind": "operand",
+        "leftValue": null,
+        "rightValue": null,
+        "now": null,
+        "before": null
+       }
+      ],
+      "stepNow": null,
+      "stepBefore": null,
+      "beforeUnknown": null
+     }
+    ]
+   }
+  ]
+ },
+ "fills": [],
+ "events": [
+  {
+   "time": 1794465900037,
+   "runId": "run-team03-s4-paper",
+   "kind": "session",
+   "text": "세션이 끝났습니다"
+  },
+  {
+   "time": 1794465930243,
+   "runId": "run-team03-s4-paper",
+   "kind": "gap",
+   "text": "데이터 공백 — 체결이 오지 않습니다(마지막 수신 15:45:00)"
+  },
+  {
+   "time": 1794527100180,
+   "runId": "run-team03-s4-paper",
+   "kind": "gap",
+   "text": "시세가 다시 들어옵니다"
+  },
+  {
+   "time": 1794527100180,
+   "runId": "run-team03-s4-paper",
+   "kind": "ready",
+   "text": "준비 중 — 필요 200 · 확보 1"
+  },
+  {
+   "time": 1794552300181,
+   "runId": "run-team03-s4-paper",
+   "kind": "session",
+   "text": "세션이 끝났습니다"
+  },
+  {
+   "time": 1794552330260,
+   "runId": "run-team03-s4-paper",
+   "kind": "gap",
+   "text": "데이터 공백 — 체결이 오지 않습니다(마지막 수신 15:45:00)"
+  }
+ ],
+ "openOrders": [],
+ "curve": [
+  {
+   "time": 1794409200000,
+   "equity": 100000000.0
+  },
+  {
+   "time": 1794495600000,
+   "equity": 100000000.0
+  }
+ ],
+ "trades": []
+}
