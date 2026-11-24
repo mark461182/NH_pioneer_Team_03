@@ -36,11 +36,13 @@ class Params:
     hedge_qty: int = 4                    # 미니코스피 계약 수 (KRX300 1계약 1.7억 ≈ 미니 4계약 1.6억)
     start: dt.time = dt.time(8, 45, 0)    # 이때부터 지정가를 걸고
     stop: dt.time = dt.time(8, 59, 30)    # 이때 미체결을 전부 취소 (09:00 현물 개장 전에 빠짐)
-    exit: dt.time = dt.time(9, 15, 0)     # 이때 두 다리를 시장가로 정리
+    exit: dt.time = dt.time(9, 15, 0)     # 이때 두 다리를 정리 (KRX300 은 상대 호가를 넘기는 지정가, 미니는 시장가)
     requote_ticks: int = 2                # 목표가가 이만큼 넘게 바뀌면 다시 걺
     max_k200_spread: float = 0.5          # 코스피200 호가가 이보다 벌어져 있으면 적정가를 믿지 않고 쉼 (포인트)
-    fill_wait: float = 6.0                # 시장가 주문 체결을 기다리는 시간(초)
+    fill_wait: float = 6.0                # 헤지·청산 주문 체결을 기다리는 시간(초)
     fill_poll: float = 1.0
+    cross_ticks: int = 10                 # KRX300 청산 지정가를 상대 최우선 호가보다 몇 틱 더 넘겨 낼지 (KRX300 은 시장가 주문이 거부됨)
+    max_exit_tries: int = 40              # 청산을 이만큼 시도해도 안 되면 포지션이 남았다고 적고 끝냄
 
 
 def bid_price(fair: float, d: int) -> float:
@@ -72,13 +74,17 @@ class Resting:
     no: str
     side: str
     price: float
+    stuck: int = 0          # 취소가 거부된 횟수
 
 
 @dataclass
 class OpenLimit:
-    """상태: 대기 → 호가중 → (철수확인) → 보유 → 끝.  하루에 한 번만 포지션을 잡습니다.
+    """상태: 대기 → 호가중 → (철수확인) → 보유 → (청산중) → 끝.  하루에 한 번만 포지션을 잡습니다.
 
-    내가 낸 지정가는 취소한 뒤에도 끝까지 체결 여부를 다시 봅니다 — 취소 요청과 체결이 엇갈릴 수 있어서입니다.
+    - 내가 낸 지정가는 취소한 뒤에도 끝까지 체결 여부를 다시 봅니다 — 취소 요청과 체결이 엇갈릴 수 있어서입니다.
+    - 취소가 거부된 주문은 살아 있는 것으로 보고, 취소될 때까지 그쪽에 새 주문을 내지 않고 매번 다시 취소합니다.
+    - 청산은 지금까지의 체결을 모두 더한 순포지션을 0 으로 만드는 것이고, 안 되면 다음 호가에서 다시 시도합니다.
+      KRX300 이 정리되기 전에는 헤지(미니)를 풀지 않습니다.
     """
     p: Params
     broker: object
@@ -92,6 +98,9 @@ class OpenLimit:
     entry: dict | None = None
     hedge: dict | None = None
     exits: list = field(default_factory=list)
+    unverified: list = field(default_factory=list)    # 취소 요청은 받아들여졌지만 잔량 0 을 아직 못 본 주문
+    takes: list = field(default_factory=list)         # 헤지·청산 주문 [주문번호, sym, side, 반영한 체결 수량, 구분]
+    exit_tries: int = 0
     note: str = ""
     _t: str = ""
 
@@ -103,19 +112,47 @@ class OpenLimit:
         self.note = (self.note + " / " if self.note else "") + s
 
     # ── 주문 묶음 ──────────────────────────────────────────────
-    def _cancel(self, side: str, why: str) -> None:
-        r = self.resting.pop(side, None)
+    def _cancel(self, side: str, why: str) -> bool:
+        """취소 요청이 받아들여지면 True. 거부되면 주문을 그대로 들고 있다가 다음 번에 다시 시도."""
+        r = self.resting.get(side)
         if r is None:
-            return
+            return True
         try:
             self.broker.cancel(r.no, KRX300, side)
-            self._log("취소", side=side, 가격=r.price, 주문번호=r.no, 이유=why)
-        except Exception as e:      # 이미 체결됐거나 없는 주문이면 오류가 정상 — 체결 여부는 _new_fills 가 계속 확인
-            self._log("취소응답", side=side, 주문번호=r.no, 오류=str(e)[:120])
+        except Exception as e:      # 접수 확인 전이거나 이미 체결된 주문 — 살아 있을 수 있으므로 버리지 않음
+            r.stuck += 1
+            self._log("취소거부", side=side, 가격=r.price, 주문번호=r.no, 횟수=r.stuck, 오류=str(e)[:120])
+            return False
+        self.resting.pop(side)
+        self.unverified.append(r)
+        self._log("취소", side=side, 가격=r.price, 주문번호=r.no, 이유=why)
+        return True
 
-    def _cancel_all(self, why: str) -> None:
-        for side in list(self.resting):
-            self._cancel(side, why)
+    def _cancel_all(self, why: str) -> bool:
+        return all([self._cancel(side, why) for side in list(self.resting)])
+
+    def _verify_cancels(self) -> None:
+        """취소했다고 본 주문에 잔량이 남아 있으면 다시 취소. 브로커가 잔량을 못 알려 주면 확인하지 않음."""
+        open_qty = getattr(self.broker, "open_qty", None)
+        if open_qty is None:
+            self.unverified.clear()
+            return
+        keep = []
+        for r in self.unverified:
+            try:
+                rem = open_qty(r.no)
+            except Exception as e:
+                self._log("조회실패", 주문번호=r.no, 오류=str(e)[:150])
+                keep.append(r)
+                continue
+            if rem:
+                try:
+                    self.broker.cancel(r.no, KRX300, r.side)
+                    self._log("취소재시도", side=r.side, 가격=r.price, 주문번호=r.no, 잔량=rem)
+                except Exception as e:
+                    self._log("취소거부", side=r.side, 가격=r.price, 주문번호=r.no, 오류=str(e)[:120])
+                keep.append(r)
+        self.unverified = keep
 
     def _place(self, side: str, price: float, fair: float) -> None:
         try:
@@ -127,30 +164,70 @@ class OpenLimit:
         self.limits.append((no, side, price))
         self._log("지정가", side=side, 가격=price, 적정가=round(fair, 2), 주문번호=no)
 
-    def _market(self, sym: str, side: str, qty: int, kind: str) -> dict:
-        """시장가를 내고 체결을 잠깐 기다림. 거부·미체결은 숨기지 않고 돌려줌."""
+    def _take(self, sym: str, side: str, qty: int, kind: str, q: Quote | None = None) -> dict:
+        """바로 체결시키는 주문을 내고 잠깐 기다림. 거부·미체결은 숨기지 않고 돌려줌.
+
+        미니는 시장가. KRX300 은 시장가가 거부되므로 상대 최우선 호가를 cross_ticks 만큼 넘긴 지정가로 내고,
+        기다려도 남은 수량은 취소합니다(다음 시도에서 새 호가로 다시 냄).
+        """
         out = {"sym": sym, "side": side, "qty": 0, "price": 0.0, "주문번호": None, "주문수량": qty}
+        price = None
+        if sym == KRX300:
+            ref = None if q is None else (q.x_ask if side == "buy" else q.x_bid)
+            if ref is None:
+                self._log(kind + "보류", sym=sym, side=side, 수량=qty, 이유="KRX300 상대 호가를 모름")
+                return out
+            price = round(ref + (1 if side == "buy" else -1) * self.p.cross_ticks * TICK, 1)
+            out["주문가격"] = price
         try:
-            no = self.broker.send(sym, side, qty)
+            no = self.broker.send(sym, side, qty, price=price) if price is not None else self.broker.send(sym, side, qty)
         except Exception as e:
-            self._log(kind + "거부", sym=sym, side=side, 수량=qty, 오류=str(e)[:200])
+            self._log(kind + "거부", sym=sym, side=side, 수량=qty, 가격=price, 오류=str(e)[:200])
+            out["거부"] = True
             return out
         out["주문번호"] = no
         waited = 0.0
         while True:
-            try:
-                got, px = self.broker.filled(no)
-            except Exception as e:
-                got, px = 0, 0.0
-                self._log("조회실패", 주문번호=no, 오류=str(e)[:150])
+            got, px = self._filled(no)
             if got >= qty or waited >= self.p.fill_wait:
                 break
             (self.sleep or _time.sleep)(self.p.fill_poll)
             waited += self.p.fill_poll
+        if got < qty and price is not None:             # 남은 지정가를 걸어 두지 않음
+            try:
+                self.broker.cancel(no, sym, side)
+            except Exception as e:
+                self._log("취소거부", sym=sym, side=side, 주문번호=no, 오류=str(e)[:120])
+            got, px = self._filled(no)
         out["qty"], out["price"] = got, px
         if got:
             self.fills.append((sym, side, got, px, kind))
-        self._log(kind, sym=sym, side=side, 주문수량=qty, 체결수량=got, 체결가=px, 주문번호=no)
+        self.takes.append([no, sym, side, got, kind])
+        self._log(kind, sym=sym, side=side, 주문수량=qty, 체결수량=got, 체결가=px, 주문가격=price, 주문번호=no)
+        return out
+
+    def _filled(self, no: str) -> tuple:
+        try:
+            return self.broker.filled(no)
+        except Exception as e:
+            self._log("조회실패", 주문번호=no, 오류=str(e)[:150])
+            return 0, 0.0
+
+    def _late_takes(self) -> None:
+        """헤지·청산 주문에 나중에 더 붙은 체결을 반영 (취소와 엇갈린 경우)."""
+        for t in self.takes:
+            no, sym, side, counted, kind = t
+            got, px = self._filled(no)
+            if got > counted:
+                self.fills.append((sym, side, got - counted, px, kind + "(늦은 체결)"))
+                t[3] = got
+                self._log("늦은체결", sym=sym, side=side, 수량=got - counted, 체결가=px, 주문번호=no)
+
+    def net(self) -> dict:
+        """지금까지의 체결을 모두 더한 순포지션 (매수 +)."""
+        out = {}
+        for sym, side, qty, _, _ in self.fills:
+            out[sym] = out.get(sym, 0) + (qty if side == "buy" else -qty)
         return out
 
     def _new_fills(self) -> list:
@@ -191,7 +268,7 @@ class OpenLimit:
         px = next(p_ for s, _, p_, _ in new + late if s == side)
         self.entry = {"side": side, "qty": got, "price": px, "t": q.t.isoformat()}
         hq = max(1, round(self.p.hedge_qty * got / self.p.qty))
-        h = self._market(MINI, opposite(side), hq, "헤지")
+        h = self._take(MINI, opposite(side), hq, "헤지")
         self.hedge = {"side": h["side"], "qty": h["qty"], "price": h["price"], "주문번호": h["주문번호"], "주문수량": hq}
         if h["주문번호"] is None:
             self._note("헤지 주문 거부 — KRX300 한 다리만 보유 중")
@@ -199,18 +276,39 @@ class OpenLimit:
             self._note(f"헤지 미완료 — 미니 {hq - h['qty']}계약 남음")
         self.state = "보유"
 
+    def _absorb_late(self) -> None:
+        """보유·청산 중에 뒤늦게 드러난 체결(취소가 안 먹은 지정가, 엇갈린 청산 주문)을 반영."""
+        for side, got, px, no in self._new_fills():
+            self.fills.append((KRX300, side, got, px, "지정가체결(늦은 체결)"))
+            self._log("늦은체결", sym=KRX300, side=side, 수량=got, 체결가=px, 주문번호=no)
+            self._note("지정가 늦은 체결 발견")
+        self._late_takes()
+        self._verify_cancels()
+        if self.resting:
+            self._cancel_all("보유 중 — 남은 지정가 정리")
+
     def _exit(self, q: Quote) -> None:
-        legs = [(KRX300, opposite(self.entry["side"]), self.entry["qty"])]
-        if self.hedge and self.hedge["qty"] > 0:
-            legs.append((MINI, opposite(self.hedge["side"]), self.hedge["qty"]))
-        for sym, side, qty in legs:
-            e = self._market(sym, side, qty, "청산")
-            self.exits.append(e)
-            if e["주문번호"] is None:
-                self._note(f"청산 주문 거부 — {sym}")
-            elif e["qty"] < qty:
-                self._note(f"청산 미완료 — {sym} {qty - e['qty']}계약 남음")
-        self.state = "끝"
+        """순포지션을 0 으로. KRX300 먼저, KRX300 이 0 이 된 뒤에만 미니를 정리. 안 되면 「청산중」으로 남아 다시 시도."""
+        self._absorb_late()
+        n = self.net().get(KRX300, 0)
+        if n:
+            e = self._take(KRX300, "sell" if n > 0 else "buy", abs(n), "청산", q)
+            if e["주문번호"] is not None or e.get("거부"):
+                self.exits.append(e)
+        if not self.net().get(KRX300, 0):
+            m = self.net().get(MINI, 0)
+            if m:
+                self.exits.append(self._take(MINI, "sell" if m > 0 else "buy", abs(m), "청산", q))
+        self.exit_tries += 1
+        left = {s_: v for s_, v in self.net().items() if v}
+        if not left:
+            self.state = "끝"
+        elif self.exit_tries >= self.p.max_exit_tries:
+            self.state = "끝"
+            self._note(f"청산 미완료 — 남은 포지션 {left}")
+            self._log("종료", 이유="청산 시도 한도", 남은포지션=left)
+        else:
+            self.state = "청산중"
 
     # ── 한 번의 판단 ────────────────────────────────────────────
     def step(self, q: Quote) -> None:
@@ -218,9 +316,14 @@ class OpenLimit:
         self._t = q.t.strftime("%H:%M:%S")
         if self.state == "끝":
             return
+        if self.state == "청산중":
+            self._exit(q)
+            return
         if self.state == "보유":
             if now >= self.p.exit:
                 self._exit(q)
+            else:
+                self._absorb_late()
             return
         if self.state in ("호가중", "철수확인"):                  # 낸 주문이 체결됐나부터
             new = self._new_fills()
@@ -229,7 +332,11 @@ class OpenLimit:
                 if self.state == "보유" and now >= self.p.exit:
                     self._exit(q)
                 return
+        if self.state in ("호가중", "철수확인"):
+            self._verify_cancels()
         if self.state == "철수확인":                              # 취소를 낸 뒤 한 번 더 봤는데 체결 없음
+            if not self._cancel_all("주문 시간 끝") or self.unverified:
+                return                                            # 아직 살아 있는 주문이 있으면 끝내지 않고 계속 취소
             self.state = "끝"
             self._note("체결 없음")
             self._log("종료", 이유="체결 없이 주문 시간 끝")
@@ -266,8 +373,8 @@ class OpenLimit:
                 continue
             if r and abs(r.price - px) <= self.p.requote_ticks * TICK + 1e-9:
                 continue
-            if r:
-                self._cancel(side, "적정가 이동")
+            if r and not self._cancel(side, "적정가 이동"):
+                continue                                          # 옛 주문이 안 빠졌으면 그쪽에 새 주문을 얹지 않음
             self._place(side, px, fair)
         self.state = "호가중"
 
@@ -276,13 +383,12 @@ class OpenLimit:
         """체결가만으로 계산한 손익(원). 수수료 제외. 포지션이 남아 있으면 손익을 확정하지 않음."""
         if not self.fills:
             return {"거래": 0, "손익": 0.0, "메모": self.note}
-        cash, net, by_sym = 0.0, {}, {}
+        cash, by_sym = 0.0, {}
         for sym, side, qty, px, _ in self.fills:
             sgn = 1 if side == "buy" else -1
             cash -= sgn * qty * px * MULT[sym]
             by_sym[sym] = by_sym.get(sym, 0.0) - sgn * qty * px * MULT[sym]
-            net[sym] = net.get(sym, 0) + sgn * qty
-        left = {s_: n for s_, n in net.items() if n}
+        left = {s_: n for s_, n in self.net().items() if n}
         if left:
             return {"거래": 1, "손익": None, "남은 포지션": left, "메모": self.note}
         return {"거래": 1, "손익": cash, "KRX300 다리": by_sym.get(KRX300, 0.0), "미니 다리": by_sym.get(MINI, 0.0),
@@ -300,6 +406,7 @@ class ReplayBroker:
     - 지정가: 주문을 낸 **다음 기록부터**, 그 사이 KRX300 거래가 있었고(누적 거래량 증가) 마지막 체결가가
       내 가격 이하(매수)·이상(매도)이면 내 가격에 전량 체결.
     - 시장가: 그 기록의 상대 최우선 호가에 전량 체결. 호가가 없으면 거부.
+    - 상대 최우선 호가를 넘기는 지정가: 그 호가에 바로 전량 체결.
     대기열 순서, 기록 사이의 순서, 내 주문이 남에게 준 영향은 반영하지 못합니다.
     """
 
@@ -336,12 +443,15 @@ class ReplayBroker:
         self._n += 1
         no = f"RP{self._n:05d}"
         self.sent.append((no, sym, side, qty, price))
+        bid, ask = self.best(sym)
+        px = ask if side == "buy" else bid
         if price is not None:
+            if px is not None and ((side == "buy" and price >= px) or (side == "sell" and price <= px)):
+                self.orders[no] = (qty, px)
+                return no
             self.resting[no] = (sym, side, qty, float(price))
             self.orders[no] = (0, 0.0)
             return no
-        bid, ask = self.best(sym)
-        px = ask if side == "buy" else bid
         if px is None:
             raise RuntimeError(f"{sym} 상대 호가 없음 — 시장가 체결 불가")
         self.orders[no] = (qty, px)
@@ -352,6 +462,9 @@ class ReplayBroker:
 
     def cancel(self, no: str, sym: str, side: str) -> None:
         self.resting.pop(no, None)
+
+    def open_qty(self, no: str) -> int:
+        return self.resting[no][2] if no in self.resting else 0
 
 
 def quote_from_snap(snap: dict) -> Quote:

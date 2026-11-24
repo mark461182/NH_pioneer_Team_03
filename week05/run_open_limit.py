@@ -6,7 +6,8 @@
 - 시세는 `--quote-env`(기본 real, 조회만), 주문은 4주차 `nh_pair.NHPaperBroker` 로 **모의(paper)만** 냅니다.
 - 시작할 때 전 거래일 15:00~15:19 의 1분봉으로 비율을 계산합니다(`--ratio` 로 직접 줄 수도 있음).
 - `--orders` 일 때는 시작 전에 모의계좌에 KRX300·미니 포지션이 없는지, 주문가능수량이 되는지 확인하고 아니면 주문 없이 끝냅니다.
-- 끝나면 남은 지정가를 다시 취소하고, 모의계좌에 KRX300·미니 포지션이 남아 있으면 시장가로 정리합니다.
+- 끝나면 남은 지정가를 다시 취소하고, 모의계좌에 KRX300 포지션이 남아 있으면 상대 호가를 넘기는 지정가로 정리합니다.
+  KRX300 이 0 이 된 뒤에만 미니를 시장가로 정리합니다(KRX300 을 못 정리하면 헤지를 남겨 둠).
 - 결과: `results/<날짜>/live_events.jsonl`(사건), `live_book.jsonl`(조회한 호가, book_rec.py 와 같은 형식), `live_summary.json`
 """
 from __future__ import annotations
@@ -99,6 +100,29 @@ def paged_broker(nh, F):
                         break
                 self._hist, self._hist_t = rows, time.time()
             return self._hist
+
+        def _row(self, no):
+            for x in self._history():
+                if str(x.get("occurs1_ord_no", "")).strip() == no:
+                    return x
+            return None
+
+        def open_qty(self, no):
+            """그 주문의 미체결 잔량. 주문내역에 아직 없으면 살아 있는 것으로 봄."""
+            x = self._row(no)
+            if x is None:
+                return 1
+            rem = nh._n(x.get("occurs1_rem_ord_qty"))
+            return int(rem) if rem == rem else 0
+
+        def cancel(self, no, sym, side):
+            x = self._row(no)
+            if x is None:                                # 원본은 여기서 조용히 넘어가 취소가 안 나갔음
+                raise RuntimeError("주문내역에 아직 없는 주문 — 취소를 내지 못함")
+            rem = nh._n(x.get("occurs1_rem_ord_qty"))
+            if rem == rem and rem > 0:
+                self.F.cancel(sym, org_ord_no=no, trd_div=nh.SIDE[side], ord_qty=str(int(rem)), environment=nh.ORDER_ENV)
+                self._hist = None                        # 다음 조회는 취소가 반영된 내역으로
 
     return PagedBroker(F)
 
@@ -195,7 +219,13 @@ def main() -> int:
             eng.step(q)
         except Exception as e:
             log("판단오류", 오류=str(e)[:300], 상태=eng.state)
-        time.sleep(max(0.2, a.poll - (time.time() - t0)))
+        wait = a.poll
+        if eng.state == "보유":                      # 들고 기다리는 동안은 조회를 줄임 (조회 한도 초과 EGW020 방지). 청산 30초 전부터 다시 촘촘히
+            to_exit = (dt.datetime.combine(today, p.exit) - now_kst()).total_seconds()
+            wait = a.poll if to_exit < 30 else min(10.0, max(a.poll, to_exit - 30))
+        time.sleep(max(0.2, wait - (time.time() - t0)))
+    if eng.state == "청산중":
+        eng._note("청산 미완료 — 실행 시간 끝")
 
     # ── 마무리: 남은 지정가 취소 → 늦은 체결 확인 → 모의계좌 잔고 대조·정리 ──
     eng._t = now_kst().strftime("%H:%M:%S")
@@ -218,15 +248,22 @@ def main() -> int:
             pos = broker.net_positions()
             left = {s: pos.get(s, 0) for s in (KRX300, MINI) if pos.get(s, 0)}
             log("잔고대조", 모의계좌_포지션={s: pos.get(s, 0) for s in (KRX300, MINI)})
-            for sym, n in left.items():              # 시작할 때 0 이었으므로 남은 것은 이 실행이 만든 포지션
-                e = eng._market(sym, "sell" if n > 0 else "buy", abs(n), "마무리정리")
-                if e["qty"] < abs(n):
-                    log("경고", 내용=f"{sym} {abs(n) - e['qty']}계약이 정리되지 않음 — HTS 에서 확인 필요")
-            if left:
+            for _ in range(5):                       # 시작할 때 0 이었으므로 남은 것은 이 실행이 만든 포지션. KRX300 먼저, 그 뒤 미니
+                if not left:
+                    break
+                sym = KRX300 if left.get(KRX300) else MINI
+                n = left[sym]
+                try:
+                    q = quote_from_snap(take_snap(F, Q, a.quote_env))
+                except Exception as e:
+                    log("시세실패", 오류=str(e)[:200]); q = None
+                eng._take(sym, "sell" if n > 0 else "buy", abs(n), "마무리정리", q)
                 time.sleep(2)
                 pos = broker.net_positions()
                 left = {s: pos.get(s, 0) for s in (KRX300, MINI) if pos.get(s, 0)}
                 log("잔고재대조", 모의계좌_포지션={s: pos.get(s, 0) for s in (KRX300, MINI)})
+            if left:
+                log("경고", 내용=f"정리되지 않은 포지션 {left} — HTS 에서 확인 필요")
         except Exception as e:
             log("마무리오류", 오류=str(e)[:300])
     res = eng.pnl()
