@@ -88,6 +88,7 @@ def paged_broker(nh, F):
         def _history(self):
             if self._hist is None or time.time() - self._hist_t > 0.8:
                 rows, key, seen = [], "", set()
+                self._hist_full = False
                 for _ in range(15):
                     r = self.F.order_history(next_key=key, environment=nh.ORDER_ENV)
                     got = r.get("Occurs1") or []
@@ -97,6 +98,7 @@ def paged_broker(nh, F):
                     rows += fresh
                     key = str(r.get("nxt_key") or "").strip()
                     if not key or not fresh:
+                        self._hist_full = True               # 끝 페이지까지 읽음 (15페이지 상한에 걸린 게 아님)
                         break
                 self._hist, self._hist_t = rows, time.time()
             return self._hist
@@ -107,6 +109,11 @@ def paged_broker(nh, F):
                     return x
             return None
 
+        def send(self, sym, side, qty, price=None):
+            no = super().send(sym, side, qty, price)
+            self._sent_at[no] = time.time()
+            return no
+
         def open_qty(self, no):
             """그 주문의 미체결 잔량. 주문내역에 아직 없으면 살아 있는 것으로 봄."""
             x = self._row(no)
@@ -114,6 +121,28 @@ def paged_broker(nh, F):
                 return 1
             rem = nh._n(x.get("occurs1_rem_ord_qty"))
             return int(rem) if rem == rem else 0
+
+        def alive(self, no):
+            """잔량이 남은 주문인지. 주문내역에 없으면: 내역을 끝까지 못 읽었거나 낸 지 60초 안이면 살아 있다고 봄."""
+            if self._row(no) is None:
+                return not self._hist_full or time.time() - self._sent_at.get(no, 0.0) < 60
+            return self.open_qty(no) > 0
+
+        def unacked(self, no):
+            """모의 서버 「미접수」: 잔량은 있는데 거래소 접수 시각이 비어 있음. 이 상태에서는 취소가 5039 로 거부됨."""
+            x = self._row(no)
+            return bool(x) and self.open_qty(no) > 0 and not str(x.get("occurs1_exch_rcv_tm", "")).strip().strip("0")
+
+        def fill_time(self, no):
+            """거래소 체결 시각(occurs1_exch_exec_tm, HHMMSSmmm). 체결 전이면 None."""
+            x = self._row(no)
+            s = str((x or {}).get("occurs1_exch_exec_tm", "")).strip()
+            if not s.strip("0") or not s.isdigit():
+                return None
+            if len(s) not in (8, 9):                         # 명세는 HHMMSSmmm. 앞자리 0 이 빠지면 8자리 — 그 밖의 길이는 믿지 않고 호가 시각을 씀
+                return None
+            s = s.zfill(9)
+            return dt.time(int(s[:2]), int(s[2:4]), int(s[4:6]))
 
         def cancel(self, no, sym, side):
             x = self._row(no)
@@ -124,7 +153,85 @@ def paged_broker(nh, F):
                 self.F.cancel(sym, org_ord_no=no, trd_div=nh.SIDE[side], ord_qty=str(int(rem)), environment=nh.ORDER_ENV)
                 self._hist = None                        # 다음 조회는 취소가 반영된 내역으로
 
-    return PagedBroker(F)
+    b = PagedBroker(F)
+    b._sent_at, b._hist_full = {}, False
+    return b
+
+
+def watch_leftovers(eng, broker, F, Q, a, log, today) -> dict:
+    """실행이 끝난 뒤에도 서버에 살아 있는 내 주문(모의 서버 「미접수」 등)이 있으면 끝내지 않고 지켜봄.
+
+    poll 마다: 새로 드러난 체결 반영 → 살아 있는 주문 취소 재시도 → 모의계좌에 포지션이 있으면 바로 정리
+    (앞선 정리 주문이 아직 살아 있으면 겹쳐 내지 않음). 살아 있는 주문도 포지션도 없으면 끝. `--watch-until` 이 한도.
+    """
+    end = hms(a.watch_until)
+    mine = lambda: [(no, KRX300, side, "지정가") for no, side, _ in eng.limits] + [(t[0], t[1], t[2], "정리") for t in eng.takes]
+    started, rounds, left, alive, fails, mismatch = False, 0, {}, [], 0, 0
+    while now_kst().time() < end:
+        try:                                              # 조회 한도·타임아웃 한 번으로 감시가 멈추지 않게
+            eng._t = now_kst().strftime("%H:%M:%S")
+            broker._hist = None
+            late = eng._new_fills()
+            for side, got, px, no in late:
+                ft = eng._fill_time(no, Quote(now_kst(), None, None)).strftime("%H:%M:%S")
+                eng.fills.append((KRX300, side, got, px, "설계밖체결"))
+                eng.offplan.append((no, side, got, px, ft))
+                log("늦은체결", sym=KRX300, side=side, 수량=got, 체결가=px, 주문번호=no, 체결시각=ft, 설계밖="실행 시간 뒤 체결")
+                eng._note("실행 시간 뒤 체결 — 설계 밖, 즉시 청산")
+            eng._late_takes()
+            alive = [x for x in mine() if broker.alive(x[0])]
+            pos = broker.net_positions()
+            left = {s: pos.get(s, 0) for s in (KRX300, MINI) if pos.get(s, 0)}
+            fails = 0
+            if not alive and not left:
+                if started:
+                    log("감시끝", 회수=rounds, 이유="살아 있는 주문·포지션 없음")
+                break
+            if not started:
+                started = True
+                log("감시시작", 살아있는주문=[(no, side, kind, "미접수" if broker.unacked(no) else "") for no, _, side, kind in alive],
+                    모의계좌_포지션=left, 한도=a.watch_until)
+            for no, sym, side, _ in alive:
+                try:
+                    broker.cancel(no, sym, side)
+                except Exception as e:
+                    if rounds % 30 == 0:                  # 기록이 너무 길어지지 않게 5분에 한 번만 적음
+                        log("취소거부", 주문번호=no, side=side, 미접수=broker.unacked(no), 오류=str(e)[:120])
+            mine_net = {s: v for s, v in eng.net().items() if v}
+            if left != mine_net and mismatch == 0:        # 잔고 반영이 늦을 수 있음 — 한 번은 기다려 보고, 계속 다르면 잔고 기준
+                mismatch = 1
+                log("잔고불일치", 모의계좌_포지션=left, 체결기록_순포지션=mine_net, 처리="한 회차 기다림")
+            elif left:
+                mismatch = 0
+                sym = KRX300 if left.get(KRX300) else MINI
+                n = left[sym]
+                reduce = "sell" if n > 0 else "buy"
+                if not any(s == sym and sd == reduce and k == "정리" for _, s, sd, k in alive):   # 줄이는 쪽 정리 주문이 살아 있을 때만 기다림
+                    try:
+                        q = quote_from_snap(take_snap(F, Q, a.quote_env))
+                    except Exception as e:
+                        log("시세실패", 오류=str(e)[:200]); q = None
+                    eng._take(sym, reduce, abs(n), "설계밖청산", q)
+            else:
+                mismatch = 0
+        except Exception as e:
+            fails += 1
+            log("감시오류", 연속=fails, 오류=str(e)[:200])
+            if fails % 30 == 0:
+                log("경고", 내용=f"감시 조회가 {fails}번 연속 실패 — HTS 에서 확인 필요")
+        rounds += 1
+        time.sleep(a.watch_poll)
+    else:
+        if started:
+            log("경고", 내용=f"감시 한도 {a.watch_until} 까지 정리되지 않음 — 살아 있는 주문 {[x[0] for x in alive]}, 포지션 {left}. HTS 에서 확인 필요")
+    if started:
+        try:
+            pos = broker.net_positions()
+            left = {s: pos.get(s, 0) for s in (KRX300, MINI) if pos.get(s, 0)}
+            log("잔고대조", 모의계좌_포지션={s: pos.get(s, 0) for s in (KRX300, MINI)}, 시점="감시 뒤")
+        except Exception as e:
+            log("감시오류", 오류=str(e)[:200], 시점="감시 뒤 잔고대조")
+    return left if started else None
 
 
 def main() -> int:
@@ -140,6 +247,8 @@ def main() -> int:
     ap.add_argument("--start", default="08:45:00")
     ap.add_argument("--stop", default="08:59:30")
     ap.add_argument("--exit", default="09:15:00")
+    ap.add_argument("--watch-until", default="15:44:00", help="끝난 뒤 살아 있는 주문·포지션을 지켜보는 한도 (정규장 15:45 마감 전)")
+    ap.add_argument("--watch-poll", type=float, default=10.0)
     ap.add_argument("--out", default=str(Path(__file__).resolve().parent / "results"))
     a = ap.parse_args()
 
@@ -227,7 +336,8 @@ def main() -> int:
     if eng.state == "청산중":
         eng._note("청산 미완료 — 실행 시간 끝")
 
-    # ── 마무리: 남은 지정가 취소 → 늦은 체결 확인 → 모의계좌 잔고 대조·정리 ──
+    # ── 마무리: 남은 지정가 취소 → 모의계좌 잔고 대조. 남은 주문·포지션 정리는 아래 감시 단계가 맡음
+    #    (감시는 줄이는 쪽 정리 주문이 살아 있으면 겹쳐 내지 않음 — 여기서 따로 정리 주문을 내면 그 확인을 건너뜀) ──
     eng._t = now_kst().strftime("%H:%M:%S")
     eng._cancel_all("마무리")
     left = {}
@@ -236,41 +346,33 @@ def main() -> int:
         try:
             for no, side, price in eng.limits:       # 취소가 안 먹은 주문이 남아 있으면 한 번 더
                 try:
-                    broker.cancel(no, KRX300, side)
+                    if broker.alive(no):
+                        broker.cancel(no, KRX300, side)
                 except Exception:
                     pass
-            time.sleep(2)
-            late = eng._new_fills()
-            if late:
-                log("마무리_늦은체결", 내역=[(s, g, px, no) for s, g, px, no in late])
-                for s, g, px, no in late:
-                    eng.fills.append((KRX300, s, g, px, "지정가체결(마무리에서 발견)"))
             pos = broker.net_positions()
             left = {s: pos.get(s, 0) for s in (KRX300, MINI) if pos.get(s, 0)}
-            log("잔고대조", 모의계좌_포지션={s: pos.get(s, 0) for s in (KRX300, MINI)})
-            for _ in range(5):                       # 시작할 때 0 이었으므로 남은 것은 이 실행이 만든 포지션. KRX300 먼저, 그 뒤 미니
-                if not left:
-                    break
-                sym = KRX300 if left.get(KRX300) else MINI
-                n = left[sym]
-                try:
-                    q = quote_from_snap(take_snap(F, Q, a.quote_env))
-                except Exception as e:
-                    log("시세실패", 오류=str(e)[:200]); q = None
-                eng._take(sym, "sell" if n > 0 else "buy", abs(n), "마무리정리", q)
-                time.sleep(2)
-                pos = broker.net_positions()
-                left = {s: pos.get(s, 0) for s in (KRX300, MINI) if pos.get(s, 0)}
-                log("잔고재대조", 모의계좌_포지션={s: pos.get(s, 0) for s in (KRX300, MINI)})
-            if left:
-                log("경고", 내용=f"정리되지 않은 포지션 {left} — HTS 에서 확인 필요")
+            log("잔고대조", 모의계좌_포지션={s: pos.get(s, 0) for s in (KRX300, MINI)}, 시점="실행 끝")
         except Exception as e:
             log("마무리오류", 오류=str(e)[:300])
-    res = eng.pnl()
-    summary = {"날짜": str(today), "주문": ("모의계좌" if a.orders else "없음(예행연습, 체결은 가정)"), "비율": ratio, "비율_기준일": rday, "d": a.d,
-               "다시거는기준": a.requote, "지정가_횟수": len(eng.limits), "상태": eng.state, "체결": eng.fills, "진입": eng.entry, "헤지": eng.hedge,
-               "청산": eng.exits, "결과": res, "모의계좌_남은포지션": left}
-    (out / f"{tag}_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+
+    def write_summary(left, watched=None):
+        res = eng.pnl()
+        summary = {"날짜": str(today), "주문": ("모의계좌" if a.orders else "없음(예행연습, 체결은 가정)"), "비율": ratio, "비율_기준일": rday, "d": a.d,
+                   "다시거는기준": a.requote, "지정가_횟수": len(eng.limits), "상태": eng.state, "체결": eng.fills, "진입": eng.entry, "헤지": eng.hedge,
+                   "청산": eng.exits, "설계밖": eng.offplan, "결과": res, "모의계좌_남은포지션": left, "감시": watched}
+        (out / f"{tag}_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        return res
+
+    res = write_summary(left)
+    if a.orders:                                     # 서버에 아직 살아 있는 내 주문이 있으면 끝내지 않고 지켜봄 (2026-11-26: 09:16 에 체결된 미접수 주문)
+        try:
+            w = watch_leftovers(eng, broker, F, Q, a, log, today)
+            if w is not None:
+                left = w
+                res = write_summary(left, watched=f"감시함 (~{now_kst().strftime('%H:%M:%S')})")
+        except Exception as e:
+            log("감시오류", 오류=str(e)[:300])
     log("끝", 결과=res, 지정가_횟수=len(eng.limits), 모의계좌_남은포지션=left)
     return 0
 

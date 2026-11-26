@@ -118,10 +118,11 @@ def test_fill_on_an_order_we_tried_to_cancel_is_still_caught():
     assert eng2.hedge["주문수량"] == 8                                            # 헤지도 그만큼
 
 
-def test_stop_then_late_fill_becomes_a_position():
+def test_stop_then_late_fill_is_caught_and_flattened_not_hedged():
     fair = R * 800.025; b = bid_price(fair, 20)
     eng, br, _ = run([snap("08:45:00"), snap("08:59:30"), snap("08:59:33", last=b, vol=1)], broker=StickyBroker())
-    assert eng.state == "보유" and eng.hedge["qty"] == 4                          # 취소가 늦어 체결된 것을 놓치지 않고 헤지
+    assert eng.state == "끝" and eng.net() in ({}, {KRX300: 0})                   # 놓치지 않되, 철수 뒤 체결이라 헤지 없이 바로 정리
+    assert not [x for x in br.sent if x[1] == MINI] and eng.entry is None
 
 
 def test_both_sides_filled_ends_flat_without_hedge():
@@ -220,10 +221,217 @@ def test_stop_does_not_finish_while_an_order_is_still_alive():
     assert eng.state == "끝" and not br.resting
 
 
-def test_late_opposite_fill_while_holding_is_netted_at_exit():
+def test_late_opposite_fill_while_holding_flattens_right_away():
     fair = R * 800.025; b = bid_price(fair, 20); s = ask_price(fair, 20)
     br = PaperLike(refuse_cancel={"RP00002": 99})                                # 매도 지정가가 끝까지 안 빠짐
-    eng, br, _ = run([snap("08:45:00"), snap("08:48:00", last=b - 0.2, vol=1), snap("08:50:00", last=s + 0.2, vol=2),
-                      snap("09:15:00", vol=2, mb=803.0, ma=803.2)], broker=br)
-    assert eng.state == "끝" and eng.pnl()["남은 포지션"] == {}                   # KRX300 은 이미 0, 미니 헤지만 정리
+    eng, br, _ = run([snap("08:45:00"), snap("08:48:00", last=b - 0.2, vol=1), snap("08:50:00", last=s + 0.2, vol=2)], broker=br)
+    assert eng.state == "끝" and eng.pnl()["남은 포지션"] == {}                   # 09:15 까지 미니만 들고 있지 않고 08:50 에 바로 정리
     assert [x for x in br.sent if x[1] == KRX300 and x[0] not in ("RP00001", "RP00002")] == []
+    assert len([x for x in br.sent if x[1] == MINI]) == 2 and "설계 밖" in eng.note
+
+
+# ── 2026-11-25·26 모의계좌: 「미접수」 주문 (접수시각 없음·취소 5039 거부·나중에 체결) ──────────
+class GhostBroker(PaperLike):
+    """모의 서버의 미접수 주문 흉내: 정해 둔 주문번호는 취소가 끝까지 거부되고, 시장가가 닿으면 나중에 체결됨."""
+
+    def __init__(self, ghosts=(), ghost_exit=False):
+        super().__init__(refuse_cancel={g: 10 ** 9 for g in ghosts}); self.ghost_exit = ghost_exit
+
+    def send(self, sym, side, qty, price=None):
+        if self.ghost_exit and sym == KRX300 and price is not None and self.snap and self.snap["t"][11:19] >= "09:15:00":
+            self._n += 1; no = f"RP{self._n:05d}"; self.sent.append((no, sym, side, qty, price))
+            self.orders[no] = (0, 0.0); self.resting[no] = (sym, side, qty, float(price)); self.refuse[no] = 10 ** 9
+            self.ghost_exit = False                                               # 첫 청산 주문만 미접수
+            return no
+        return super().send(sym, side, qty, price)
+
+
+def test_ghost_order_filled_after_stop_is_flattened_without_hedge():
+    fair = R * 800.025; b = bid_price(fair, 20)
+    br = GhostBroker(ghosts=["RP00001"])                                         # 매수 지정가가 미접수 — 08:59:30 에 못 뺌
+    eng, br, log = run([snap("08:45:00"), snap("08:59:30"), snap("08:59:33"), snap("09:02:00", last=b, vol=1)], broker=br)
+    assert eng.state == "끝" and eng.pnl()["남은 포지션"] == {}
+    assert not [x for x in br.sent if x[1] == MINI]                              # 헤지하지 않음
+    assert [x[2] for x in br.sent if x[1] == KRX300][-1] == "sell"                 # 바로 반대매매
+    res = eng.pnl()
+    assert eng.entry is None and res["거래"] == 0 and res["설계밖_체결"] == 1 and "철수" in eng.note
+
+
+def test_fill_before_stop_seen_after_stop_is_a_normal_entry():
+    fair = R * 800.025; b = bid_price(fair, 20)
+    br = GhostBroker(ghosts=["RP00001"])
+    eng, br, _ = run([snap("08:45:00"), snap("08:59:30")], broker=br)
+    br.orders["RP00001"] = (1, b); br.resting.pop("RP00001"); br.ftime["RP00001"] = dt.time(8, 59, 25)   # 철수 전에 체결됐는데 늦게 봄
+    s = snap("08:59:33"); br.snap = s; eng.step(quote_from_snap(s))
+    assert eng.state == "보유" and eng.entry["side"] == "buy" and eng.hedge["qty"] == 4
+
+
+def test_exit_waits_for_an_unacknowledged_exit_order_instead_of_doubling():
+    fair = R * 800.025; b = bid_price(fair, 20)
+    br = GhostBroker(ghost_exit=True)
+    eng, br, _ = run([snap("08:45:00"), snap("08:48:00", last=b, vol=1), snap("09:15:00"), snap("09:15:03"), snap("09:15:06")], broker=br)
+    exits = [x for x in br.sent if x[1] == KRX300 and x[2] == "sell"]
+    assert len(exits) - 1 == 1                                                   # 첫 매도 지정가(RP00002) 말고 청산 주문은 하나뿐
+    assert eng.state == "청산중" and eng.net()[MINI] == -4                        # KRX300 이 안 풀렸으니 헤지도 그대로
+    no = exits[-1][0]; br.orders[no] = (1, 3100.0); br.resting.pop(no)            # 미접수가 풀려 체결
+    s = snap("09:15:09"); br.advance(s); eng.step(quote_from_snap(s))
+    assert eng.state == "끝" and eng.pnl()["남은 포지션"] == {}
+    assert len([x for x in br.sent if x[1] == KRX300 and x[2] == "sell"]) == 2
+
+
+def test_runner_watch_flattens_a_ghost_that_fills_after_the_run(monkeypatch):
+    """11/26 재현: 09:15 청산까지 끝났는데 미접수 매도가 09:16 에 체결 → 감시 단계가 바로 되사서 0 으로."""
+    import types
+    import run_open_limit as rol
+
+    class AccountGhost(GhostBroker):
+        def alive(self, no):
+            return no in self.resting
+        def unacked(self, no):
+            return no in self.resting
+        def net_positions(self):
+            out = {}
+            for no, sym, side, qty, price in self.sent:
+                got = self.orders.get(no, (0, 0))[0]
+                out[sym] = out.get(sym, 0) + (got if side == "buy" else -got)
+            return {k: v for k, v in out.items() if v}
+
+    fair = R * 800.025; b = bid_price(fair, 20)
+    br = AccountGhost(ghosts=["RP00002"])                                        # 매도 지정가가 미접수로 끝까지 남음
+    eng, br, log = run([snap("08:45:00"), snap("08:48:00", last=b, vol=1), snap("09:15:00")], broker=br)
+    assert eng.state == "끝" and eng.pnl()["남은 포지션"] == {} and br.alive("RP00002")
+
+    import itertools
+    clock = (dt.datetime(2026, 11, 26, 9, 16) + dt.timedelta(seconds=s) for s in itertools.count())
+    sleeps = []
+    def fake_now():
+        return next(clock)
+    def fake_sleep(_):
+        sleeps.append(1)
+        if len(sleeps) == 2:                                                     # 감시 중 미접수 매도가 체결됨
+            br.orders["RP00002"] = (1, 3205.0); br.resting.pop("RP00002")
+    monkeypatch.setattr(rol, "now_kst", fake_now)
+    monkeypatch.setattr(rol.time, "sleep", fake_sleep)
+    def fresh(F, Q, env):
+        s_ = snap("09:16:04", xb=3199.0, xa=3201.0); br.snap = s_; return s_
+    monkeypatch.setattr(rol, "take_snap", fresh)
+    events = []
+    a = types.SimpleNamespace(watch_until="15:44:00", watch_poll=10.0, quote_env="real")
+    left = rol.watch_leftovers(eng, br, None, None, a, lambda k, **kw: events.append((k, kw)), dt.date(2026, 11, 26))
+    kinds = [k for k, _ in events]
+    assert left == {} and "감시시작" in kinds and "감시끝" in kinds
+    buys = [x for x in br.sent if x[1] == KRX300 and x[2] == "buy"]
+    assert buys[-1][4] == round(3201.0 + P.cross_ticks * 0.2, 1)                  # 상대 매도호가를 넘기는 지정가로 되삼
+    assert eng.pnl()["설계밖_체결"] == 1 and eng.pnl()["남은 포지션"] == {}
+
+
+# ── 리뷰 반영: 감시 단계·주문내역 파싱 ─────────────────────────────────
+def _watch_env(monkeypatch, br, eng, on_sleep=None, quote=None):
+    import itertools, types
+    import run_open_limit as rol
+    clock = (dt.datetime(2026, 11, 26, 9, 16) + dt.timedelta(seconds=s) for s in itertools.count())
+    sleeps = []
+    def fake_sleep(_):
+        sleeps.append(1)
+        if on_sleep:
+            on_sleep(len(sleeps))
+    def fresh(F, Q, env):
+        s_ = quote or snap("09:16:04", xb=3199.0, xa=3201.0); br.snap = s_; return s_
+    monkeypatch.setattr(rol, "now_kst", lambda: next(clock))
+    monkeypatch.setattr(rol.time, "sleep", fake_sleep)
+    monkeypatch.setattr(rol, "take_snap", fresh)
+    events = []
+    a = types.SimpleNamespace(watch_until="09:30:00", watch_poll=10.0, quote_env="real")
+    left = rol.watch_leftovers(eng, br, None, None, a, lambda k, **kw: events.append((k, kw)), dt.date(2026, 11, 26))
+    return left, events
+
+
+class AccountBroker(GhostBroker):
+    def alive(self, no):
+        return no in self.resting
+    def unacked(self, no):
+        return no in self.resting
+    def net_positions(self):
+        out = {}
+        for no, sym, side, qty, price in self.sent:
+            got = self.orders.get(no, (0, 0))[0]
+            out[sym] = out.get(sym, 0) + (got if side == "buy" else -got)
+        return {k: v for k, v in out.items() if v}
+
+
+def test_watch_keeps_going_after_an_api_error(monkeypatch):
+    fair = R * 800.025; b = bid_price(fair, 20)
+    br = AccountBroker(ghosts=["RP00002"])
+    eng, br, _ = run([snap("08:45:00"), snap("08:48:00", last=b, vol=1), snap("09:15:00")], broker=br)
+    real = br.net_positions; calls = []
+    def flaky():
+        calls.append(1)
+        if len(calls) == 2:
+            raise RuntimeError("(EGW020) 요청이 허용된 양을 초과")
+        return real()
+    br.net_positions = flaky
+    def release(n):
+        if n == 3:
+            br.orders["RP00002"] = (1, 3205.0); br.resting.pop("RP00002")
+    left, events = _watch_env(monkeypatch, br, eng, on_sleep=release)
+    kinds = [k for k, _ in events]
+    assert "감시오류" in kinds and "감시끝" in kinds and left == {}
+
+
+def test_watch_does_not_let_an_original_limit_block_the_flatten(monkeypatch):
+    """미접수 매수 지정가 A 가 체결돼 +1 인데, 다른 미접수 매도 지정가 B 가 살아 있어도 바로 정리."""
+    fair = R * 800.025
+    br = AccountBroker(ghosts=["RP00001", "RP00002"])
+    eng, br, _ = run([snap("08:45:00"), snap("08:59:30"), snap("08:59:33")], broker=br)
+    assert eng.state == "철수확인"
+    br.orders["RP00001"] = (1, 3195.0); br.resting.pop("RP00001")              # A 체결 (실행 뒤)
+    left, events = _watch_env(monkeypatch, br, eng)
+    sells = [x for x in br.sent if x[1] == KRX300 and x[2] == "sell" and x[0] != "RP00002"]
+    assert len(sells) == 1 and br.filled(sells[0][0])[0] == 1                  # B 가 살아 있어도 정리 주문을 냄
+    assert br.net_positions() == {}
+    assert ("RP00002" in br.resting) and left == {}                             # B 는 여전히 미접수 — 감시는 한도까지 계속 취소
+
+
+def _paged(rows_pages):
+    import types
+    import run_open_limit as rol
+
+    class Base:
+        def __init__(self, F):
+            self.F, self._hist, self._hist_t = F, None, 0.0
+        def send(self, *a, **k):
+            return "0000000999"
+    def _n(x):
+        try:
+            return float(str(x).strip() or "nan")
+        except ValueError:
+            return float("nan")
+    nh = types.SimpleNamespace(NHPaperBroker=Base, ORDER_ENV="paper", SIDE={"buy": "1", "sell": "2"}, _n=_n)
+    pages = list(rows_pages)
+    class F:
+        @staticmethod
+        def order_history(next_key="", environment=None):
+            i = int(next_key or 0)
+            return {"Occurs1": pages[i], "nxt_key": str(i + 1) if i + 1 < len(pages) else ""}
+    return rol.paged_broker(nh, F)
+
+
+def _row(no, rem="1", rcv="", exe="000000000", sts="1"):
+    return {"occurs1_ord_no": no, "occurs1_org_ord_no": no, "occurs1_rem_ord_qty": rem, "occurs1_exch_rcv_tm": rcv,
+            "occurs1_exch_exec_tm": exe, "occurs1_ord_sts": sts, "occurs1_exec_qty": "0"}
+
+
+def test_paged_broker_reads_ghost_fields_like_the_server_sends_them():
+    b = _paged([[_row("0000000934"), _row("0000000218", rem="0", exe="090247749", sts="6"), _row("0000000051", rem="0", exe="84703211", sts="6"),
+                 _row("0000000936", rem="0", rcv="124051194", sts="3")]])
+    assert b.unacked("0000000934") and b.alive("0000000934") and b.fill_time("0000000934") is None
+    assert b.fill_time("0000000218") == dt.time(9, 2, 47) and not b.alive("0000000218")
+    assert b.fill_time("0000000051") == dt.time(8, 47, 3)                       # 앞자리 0 이 빠져 와도
+    assert not b.unacked("0000000936") and not b.alive("0000000936")
+    assert not b.alive("0000000777")                                            # 내역 끝까지 읽었는데 없음 + 낸 적 없음
+
+
+def test_paged_broker_treats_a_missing_order_as_alive_when_history_was_cut_off():
+    pages = [[_row(f"{i:010d}", rem="0", rcv="090000000", sts="3")] for i in range(20)]   # 20페이지 > 상한 15
+    b = _paged(pages)
+    assert b.alive("0000000019") is True and b._hist_full is False

@@ -84,7 +84,11 @@ class OpenLimit:
     - 내가 낸 지정가는 취소한 뒤에도 끝까지 체결 여부를 다시 봅니다 — 취소 요청과 체결이 엇갈릴 수 있어서입니다.
     - 취소가 거부된 주문은 살아 있는 것으로 보고, 취소될 때까지 그쪽에 새 주문을 내지 않고 매번 다시 취소합니다.
     - 청산은 지금까지의 체결을 모두 더한 순포지션을 0 으로 만드는 것이고, 안 되면 다음 호가에서 다시 시도합니다.
-      KRX300 이 정리되기 전에는 헤지(미니)를 풀지 않습니다.
+      KRX300 이 정리되기 전에는 헤지(미니)를 풀지 않습니다. 앞서 낸 청산 주문이 아직 살아 있으면(모의 서버 「미접수」)
+      새 청산 주문을 겹쳐 내지 않고 그 주문의 취소만 다시 시도합니다.
+    - **설계 밖 체결은 헤지하지 않고 바로 전부 청산합니다.** 설계 밖 = 거래소 체결 시각이 철수 시각(08:59:30) 이후인
+      지정가 체결, 또는 이미 한 포지션을 들고 있는 중에 KRX300 지정가가 또 체결된 것. 모의 서버에서 취소가 안 먹은
+      「미접수」 주문이 장 시작 뒤에 체결되는 일이 실제로 있었습니다(2026-11-25·26).
     """
     p: Params
     broker: object
@@ -101,6 +105,7 @@ class OpenLimit:
     unverified: list = field(default_factory=list)    # 취소 요청은 받아들여졌지만 잔량 0 을 아직 못 본 주문
     takes: list = field(default_factory=list)         # 헤지·청산 주문 [주문번호, sym, side, 반영한 체결 수량, 구분]
     exit_tries: int = 0
+    offplan: list = field(default_factory=list)       # 설계 밖 체결 (주문번호, side, qty, price, 체결시각)
     note: str = ""
     _t: str = ""
 
@@ -213,6 +218,47 @@ class OpenLimit:
             self._log("조회실패", 주문번호=no, 오류=str(e)[:150])
             return 0, 0.0
 
+    def _fill_time(self, no: str, q: Quote) -> dt.time:
+        """거래소 체결 시각. 브로커가 모르면 지금 본 호가의 시각."""
+        ft = getattr(self.broker, "fill_time", None)
+        if ft is not None:
+            try:
+                t = ft(no)
+                if t is not None:
+                    return t
+            except Exception as e:
+                self._log("조회실패", 주문번호=no, 오류=str(e)[:150])
+        return q.t.time()
+
+    def _alive(self, no: str) -> bool:
+        """그 주문에 잔량이 남아 있는지. 브로커가 모르면 남아 있지 않다고 봄(재생·시험)."""
+        f = getattr(self.broker, "alive", None) or getattr(self.broker, "open_qty", None)
+        if f is None:
+            return False
+        try:
+            return bool(f(no))
+        except Exception as e:
+            self._log("조회실패", 주문번호=no, 오류=str(e)[:150])
+            return True                                    # 모르면 살아 있다고 보고 겹쳐 내지 않음
+
+    def _pending_takes(self, sym: str) -> list:
+        """아직 잔량이 남은 헤지·청산 주문. 있으면 취소를 다시 시도."""
+        out = [t for t in self.takes if t[1] == sym and self._alive(t[0])]
+        for t in out:
+            try:
+                self.broker.cancel(t[0], sym, t[2])
+                self._log("취소재시도", sym=sym, side=t[2], 주문번호=t[0], 이유="앞선 주문이 살아 있어 새 주문을 겹쳐 내지 않음")
+            except Exception as e:
+                self._log("취소거부", sym=sym, side=t[2], 주문번호=t[0], 오류=str(e)[:120])
+        return out
+
+    def _go_offplan(self, q: Quote, why: str) -> None:
+        """설계 밖 포지션 — 헤지·보유 없이 바로 전부 청산."""
+        self._note(why)
+        self._log("설계밖", 이유=why, 순포지션=self.net())
+        self.state = "청산중"
+        self._exit(q)
+
     def _late_takes(self) -> None:
         """헤지·청산 주문에 나중에 더 붙은 체결을 반영 (취소와 엇갈린 경우)."""
         for t in self.takes:
@@ -248,15 +294,28 @@ class OpenLimit:
                     self.resting.pop(side)
         return new
 
-    def _on_fills(self, q: Quote, new: list) -> None:
+    def _record_limit_fills(self, q: Quote, new: list, **extra) -> list:
+        """지정가 체결을 반영하고, 거래소 체결 시각이 철수 시각 이후인 것(설계 밖)을 골라 돌려줌."""
+        off = []
         for side, got, px, no in new:
-            self.fills.append((KRX300, side, got, px, "지정가체결"))
-            self._log("체결", side=side, 수량=got, 체결가=px, 주문번호=no, 코스피200=_mid(q.k_bid, q.k_ask))
+            ft = self._fill_time(no, q)
+            late = ft >= self.p.stop
+            self.fills.append((KRX300, side, got, px, "설계밖체결" if late else "지정가체결"))
+            self._log("체결", side=side, 수량=got, 체결가=px, 주문번호=no, 체결시각=ft.strftime("%H:%M:%S"),
+                      코스피200=_mid(q.k_bid, q.k_ask), **({"설계밖": "철수 시각 뒤 체결"} if late else {}), **extra)
+            if late:
+                off.append((no, side, got, px, ft.strftime("%H:%M:%S")))
+        self.offplan += off
+        return off
+
+    def _on_fills(self, q: Quote, new: list) -> None:
+        off = self._record_limit_fills(q, new)
         self._cancel_all("체결 — 남은 지정가 정리")
         late = self._new_fills()                       # 취소와 엇갈려 체결된 것
-        for side, got, px, no in late:
-            self.fills.append((KRX300, side, got, px, "지정가체결"))
-            self._log("체결", side=side, 수량=got, 체결가=px, 주문번호=no, 비고="취소와 엇갈림")
+        off += self._record_limit_fills(q, late, 비고="취소와 엇갈림")
+        if off:
+            self._go_offplan(q, f"철수 시각({self.p.stop.strftime('%H:%M:%S')}) 뒤 체결 {len(off)}건 — 설계 밖이라 헤지 없이 즉시 청산")
+            return
         net = sum(g * (1 if s == "buy" else -1) for s, g, _, _ in new + late)
         if net == 0:                                   # 매수·매도가 둘 다 체결 — 이미 평평하므로 헤지하지 않음
             self.state = "끝"
@@ -276,30 +335,46 @@ class OpenLimit:
             self._note(f"헤지 미완료 — 미니 {hq - h['qty']}계약 남음")
         self.state = "보유"
 
-    def _absorb_late(self) -> None:
-        """보유·청산 중에 뒤늦게 드러난 체결(취소가 안 먹은 지정가, 엇갈린 청산 주문)을 반영."""
-        for side, got, px, no in self._new_fills():
-            self.fills.append((KRX300, side, got, px, "지정가체결(늦은 체결)"))
-            self._log("늦은체결", sym=KRX300, side=side, 수량=got, 체결가=px, 주문번호=no)
-            self._note("지정가 늦은 체결 발견")
+    def _absorb_late(self) -> int:
+        """보유·청산 중에 뒤늦게 드러난 체결(취소가 안 먹은 지정가, 엇갈린 청산 주문)을 반영. 새 KRX300 지정가 체결 수를 돌려줌."""
+        new = self._new_fills()
+        for side, got, px, no in new:
+            self.fills.append((KRX300, side, got, px, "설계밖체결"))
+            ft = getattr(self.broker, "fill_time", lambda _: None)
+            try:
+                t = ft(no)
+            except Exception:
+                t = None
+            self.offplan.append((no, side, got, px, t.strftime("%H:%M:%S") if t else self._t))
+            self._log("늦은체결", sym=KRX300, side=side, 수량=got, 체결가=px, 주문번호=no, 설계밖="포지션 보유 중 추가 체결")
         self._late_takes()
         self._verify_cancels()
         if self.resting:
             self._cancel_all("보유 중 — 남은 지정가 정리")
+        return len(new)
 
     def _exit(self, q: Quote) -> None:
         """순포지션을 0 으로. KRX300 먼저, KRX300 이 0 이 된 뒤에만 미니를 정리. 안 되면 「청산중」으로 남아 다시 시도."""
-        self._absorb_late()
+        if self._absorb_late() and self.state != "청산중":
+            self._note("청산 직전 추가 체결 — 설계 밖, 함께 청산")
+        waiting = False
         n = self.net().get(KRX300, 0)
         if n:
-            e = self._take(KRX300, "sell" if n > 0 else "buy", abs(n), "청산", q)
-            if e["주문번호"] is not None or e.get("거부"):
-                self.exits.append(e)
+            if self._pending_takes(KRX300):
+                waiting = True
+            else:
+                e = self._take(KRX300, "sell" if n > 0 else "buy", abs(n), "청산", q)
+                if e["주문번호"] is not None or e.get("거부"):
+                    self.exits.append(e)
         if not self.net().get(KRX300, 0):
             m = self.net().get(MINI, 0)
             if m:
-                self.exits.append(self._take(MINI, "sell" if m > 0 else "buy", abs(m), "청산", q))
-        self.exit_tries += 1
+                if self._pending_takes(MINI):
+                    waiting = True
+                else:
+                    self.exits.append(self._take(MINI, "sell" if m > 0 else "buy", abs(m), "청산", q))
+        if not waiting:                                    # 앞선 주문을 기다린 회차는 청산 시도로 세지 않음
+            self.exit_tries += 1
         left = {s_: v for s_, v in self.net().items() if v}
         if not left:
             self.state = "끝"
@@ -322,8 +397,8 @@ class OpenLimit:
         if self.state == "보유":
             if now >= self.p.exit:
                 self._exit(q)
-            else:
-                self._absorb_late()
+            elif self._absorb_late():                              # 하루 한 포지션 설계 — 또 체결되면 들고 있지 않고 전부 정리
+                self._go_offplan(q, "보유 중 KRX300 지정가 추가 체결 — 설계 밖이라 즉시 전부 청산")
             return
         if self.state in ("호가중", "철수확인"):                  # 낸 주문이 체결됐나부터
             new = self._new_fills()
@@ -380,7 +455,10 @@ class OpenLimit:
 
     # ── 결과 ───────────────────────────────────────────────────
     def pnl(self) -> dict:
-        """체결가만으로 계산한 손익(원). 수수료 제외. 포지션이 남아 있으면 손익을 확정하지 않음."""
+        """체결가만으로 계산한 손익(원). 수수료 제외. 포지션이 남아 있으면 손익을 확정하지 않음.
+
+        「거래」는 설계대로 잡은 진입이 있었는지(0/1). 설계 밖 체결이 있었으면 「설계밖_체결」 건수를 붙임 — 그날 손익은 전략 성과가 아님.
+        """
         if not self.fills:
             return {"거래": 0, "손익": 0.0, "메모": self.note}
         cash, by_sym = 0.0, {}
@@ -389,10 +467,16 @@ class OpenLimit:
             cash -= sgn * qty * px * MULT[sym]
             by_sym[sym] = by_sym.get(sym, 0.0) - sgn * qty * px * MULT[sym]
         left = {s_: n for s_, n in self.net().items() if n}
+        out = {"거래": 1 if self.entry else 0}
         if left:
-            return {"거래": 1, "손익": None, "남은 포지션": left, "메모": self.note}
-        return {"거래": 1, "손익": cash, "KRX300 다리": by_sym.get(KRX300, 0.0), "미니 다리": by_sym.get(MINI, 0.0),
-                "KRX300 틱 환산": round(cash / (TICK * MULT[KRX300]), 1), "남은 포지션": {}, "메모": self.note}
+            out.update({"손익": None, "남은 포지션": left})
+        else:
+            out.update({"손익": cash, "KRX300 다리": by_sym.get(KRX300, 0.0), "미니 다리": by_sym.get(MINI, 0.0),
+                        "KRX300 틱 환산": round(cash / (TICK * MULT[KRX300]), 1), "남은 포지션": {}})
+        if self.offplan:
+            out["설계밖_체결"] = len(self.offplan)
+        out["메모"] = self.note
+        return out
 
 
 def _mid(b, a):
@@ -417,7 +501,14 @@ class ReplayBroker:
         self.orders: dict[str, tuple[int, float]] = {}
         self.resting: dict[str, tuple[str, str, int, float]] = {}
         self.sent: list[tuple] = []
+        self.ftime: dict[str, dt.time] = {}              # 주문번호 → 체결 시각 (그 기록의 시각)
         self._n = 0
+
+    def _now(self) -> dt.time | None:
+        return dt.datetime.fromisoformat(self.snap["t"]).time() if self.snap and self.snap.get("t") else None
+
+    def fill_time(self, no: str) -> dt.time | None:
+        return self.ftime.get(no)
 
     def advance(self, snap: dict) -> None:
         """다음 기록으로 넘어가며 걸려 있던 지정가의 체결을 판정."""
@@ -429,6 +520,7 @@ class ReplayBroker:
                 if sym == KRX300 and ((side == "buy" and last <= px + 1e-9) or (side == "sell" and last >= px - 1e-9)):
                     self.orders[no] = (qty, px)
                     self.resting.pop(no)
+                    self.ftime[no] = dt.datetime.fromisoformat(snap["t"]).time()
         if vol is not None:
             self.prev_vol = vol
         self.snap = snap
@@ -448,6 +540,7 @@ class ReplayBroker:
         if price is not None:
             if px is not None and ((side == "buy" and price >= px) or (side == "sell" and price <= px)):
                 self.orders[no] = (qty, px)
+                self.ftime[no] = self._now()
                 return no
             self.resting[no] = (sym, side, qty, float(price))
             self.orders[no] = (0, 0.0)
@@ -455,6 +548,7 @@ class ReplayBroker:
         if px is None:
             raise RuntimeError(f"{sym} 상대 호가 없음 — 시장가 체결 불가")
         self.orders[no] = (qty, px)
+        self.ftime[no] = self._now()
         return no
 
     def filled(self, no: str) -> tuple[int, float]:
