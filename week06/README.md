@@ -37,7 +37,6 @@
 | [demo6.py](demo6.py) | 재생 시연 — 과거 하루를 틱으로 흘리고 장애를 끼워 넣음 (서버 아님) |
 | [figs6.py](figs6.py) | 그림 |
 | [test6.py](test6.py) | 시험 33개 (키·네트워크 불필요) |
-| `v1_20261120/` | 11/22 수정 전 파일 보관 (README·rules6·runner6·monitor6·backtest6·test6·figs6·demo6) |
 | `pair_core.py` · `risk_layer.py` · `ou_noise.py` · `pair_spread.py` · `nh_pair.py` | **4주차 파일 그대로** (고치지 않음) |
 | `results/` | `compare.csv` · `compare_by_year.csv` · `sensitivity.csv` · `trades_<설정>.csv` · `risk_events_D.csv` · `risk_events_E.csv` · `theory6.json` · `demo_<날짜>/` · `figs/` |
 | `run6_*.bat` | 윈도에서 두 번 눌러 실행 |
